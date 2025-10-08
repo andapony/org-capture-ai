@@ -576,13 +576,13 @@ URL is the source URL. Update entry at MARKER with results."
 
               ;; Add summary to body
               (when summary
-                (org-end-of-meta-data t)
-                ;; Skip any existing blank lines
+                ;; Move past properties but NOT past blank lines
+                (org-end-of-meta-data)
+                ;; Delete any existing blank lines
                 (while (and (looking-at "^[ \t]*$") (not (eobp)))
-                  (forward-line 1))
-                (unless (eobp)
-                  (beginning-of-line))
-
+                  (delete-region (point) (progn (forward-line 1) (point))))
+                ;; Insert exactly one blank line, then the summary
+                (insert "\n")
                 ;; Insert summary and fill long lines
                 (let ((start-pos (point)))
                   (insert summary "\n\n")
@@ -674,31 +674,37 @@ This clears the existing entry body and replaces it with fresh content
 from the URL. Metadata properties and tags will be updated.
 The heading title will be replaced with the new AI-generated title."
   (interactive)
-  (let ((url (org-entry-get nil "URL"))
-        (marker (point-marker)))
+  (let ((url (org-entry-get nil "URL")))
     (if url
         (when (yes-or-no-p (format "Refresh entry from %s? This will replace existing content. " url))
           (save-excursion
-            (org-with-point-at marker
-              (org-back-to-heading t)
+            (org-back-to-heading t)
 
-              ;; Clear old content but preserve structure
-              ;; Remove body content (everything after properties drawer)
-              (org-end-of-meta-data t)
-              (let ((body-start (point)))
-                (org-end-of-subtree t t)
-                (delete-region body-start (point)))
+            ;; Clear old content but preserve structure
+            ;; Remove body content (everything after properties drawer)
+            (org-end-of-meta-data t)
+            (let ((body-start (point)))
+              ;; Move to end of current entry (not including next heading)
+              (org-end-of-subtree t)
+              ;; Back up to before the newline that precedes next heading
+              (when (and (not (eobp)) (looking-at "^\\*"))
+                (forward-line -1)
+                (end-of-line))
+              (delete-region body-start (point)))
 
-              ;; Clear old metadata properties (keep structural ones)
-              (dolist (prop '("TITLE" "CREATOR" "PUBLISHER" "DATE" "TYPE"
-                            "LANGUAGE" "RIGHTS" "DESCRIPTION" "FORMAT"
-                            "SOURCE" "RELATION" "COVERAGE" "SUBJECT"
-                            "AI_MODEL" "PROCESSED_AT" "ERROR"))
-                (org-entry-delete nil prop))
+            ;; Clear old metadata properties (keep structural ones)
+            (dolist (prop '("TITLE" "CREATOR" "PUBLISHER" "DATE" "TYPE"
+                          "LANGUAGE" "RIGHTS" "DESCRIPTION" "FORMAT"
+                          "SOURCE" "RELATION" "COVERAGE" "SUBJECT"
+                          "AI_MODEL" "PROCESSED_AT" "ERROR"))
+              (org-entry-delete nil prop))
 
-              ;; Clear old tags
-              (org-set-tags nil)
+            ;; Clear old tags
+            (org-set-tags nil)
 
+            ;; Create marker AFTER clearing content, at the heading
+            (org-back-to-heading t)
+            (let ((marker (point-marker)))
               ;; Start fresh processing
               (org-capture-ai--set-status marker "refreshing")
               (org-capture-ai-fetch-url url
