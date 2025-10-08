@@ -502,12 +502,14 @@ URL is the source URL. Update entry at MARKER with results."
             (org-with-point-at marker
               (org-back-to-heading t)
 
-              ;; Update heading title
+              ;; Update heading title and TITLE property
               (when title
                 (let ((level (org-current-level)))
                   (beginning-of-line)
                   (looking-at org-complex-heading-regexp)
-                  (replace-match (concat (make-string level ?*) " " title) nil nil nil 0)))
+                  (replace-match (concat (make-string level ?*) " " title) nil nil nil 0))
+                ;; Update TITLE property with AI-generated title
+                (org-entry-put nil "TITLE" title))
 
               ;; Add summary to body
               (when summary
@@ -517,7 +519,20 @@ URL is the source URL. Update entry at MARKER with results."
                   (forward-line 1))
                 (unless (eobp)
                   (beginning-of-line))
-                (insert summary "\n\n"))
+
+                ;; Insert summary and fill long lines
+                (let ((start-pos (point)))
+                  (insert summary "\n\n")
+                  ;; Fill the inserted text to wrap long lines
+                  (fill-region start-pos (- (point) 2) nil t))
+
+                ;; Set DESCRIPTION property if not already set
+                ;; (use first sentence of AI summary as fallback for missing meta description)
+                (unless (org-entry-get nil "DESCRIPTION")
+                  (let ((first-sentence (if (string-match "^\\([^.!?]+[.!?]\\)" summary)
+                                            (match-string 1 summary)
+                                          summary)))
+                    (org-entry-put nil "DESCRIPTION" first-sentence))))
 
               (org-entry-put nil "AI_MODEL" (symbol-name gptel-model))))
 
