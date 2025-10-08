@@ -163,9 +163,10 @@
 ;; Add global keybinding for URL capture
 (global-set-key (kbd "C-c w") 'org-capture)
 
-;; Add keybinding for reprocessing entries
+;; Add keybindings for entry management
 (with-eval-after-load 'org
-  (define-key org-mode-map (kbd "C-c C-x r") 'org-capture-ai-reprocess-entry))
+  (define-key org-mode-map (kbd "C-c C-x r") 'org-capture-ai-reprocess-entry)
+  (define-key org-mode-map (kbd "C-c C-x R") 'org-capture-ai-refresh-entry))
 
 ;; Add keybinding for batch processing
 (global-set-key (kbd "C-c C-x p") 'org-capture-ai-process-queued)

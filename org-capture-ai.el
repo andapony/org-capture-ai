@@ -11,8 +11,8 @@
 ;;; Commentary:
 
 ;; org-capture-ai provides AI-enhanced URL capture for org-mode using LLMs.
-;; It automatically fetches web content, extracts readable text, generates
-;; summaries, and extracts tags using AI models via gptel.
+;; It automatically fetches web content, extracts Dublin Core metadata,
+;; generates summaries, and extracts tags using AI models via gptel.
 ;;
 ;; The workflow is: Capture → Finalize → Fetch URL → Call LLM → Update Properties
 ;; All processing happens asynchronously to avoid blocking Emacs.
@@ -22,6 +22,11 @@
 ;;   (org-capture-ai-setup)
 ;;
 ;; Then use the capture template (default key "u" for URL capture).
+;;
+;; Commands:
+;;   org-capture-ai-reprocess-entry - Reprocess entry (keeps existing content)
+;;   org-capture-ai-refresh-entry   - Refresh entry (replaces all content)
+;;   org-capture-ai-process-queued  - Process all queued entries
 
 ;;; Code:
 
@@ -568,7 +573,8 @@ URL is the source URL. Update entry at MARKER with results."
     (message "org-capture-ai: Started processing %d queued entries" processed)))
 
 (defun org-capture-ai-reprocess-entry ()
-  "Manually reprocess the org entry at point."
+  "Manually reprocess the org entry at point.
+This adds new AI analysis to existing content without removing it."
   (interactive)
   (let ((url (org-entry-get nil "URL"))
         (marker (point-marker)))
@@ -582,6 +588,48 @@ URL is the source URL. Update entry at MARKER with results."
               (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
               (set-marker marker nil)))
           (message "org-capture-ai: Reprocessing %s" url))
+      (message "org-capture-ai: No URL property found"))))
+
+(defun org-capture-ai-refresh-entry ()
+  "Refresh the org entry at point by re-fetching and replacing content.
+This clears the existing entry body and replaces it with fresh content
+from the URL. Metadata properties and tags will be updated.
+The heading title will be replaced with the new AI-generated title."
+  (interactive)
+  (let ((url (org-entry-get nil "URL"))
+        (marker (point-marker)))
+    (if url
+        (when (yes-or-no-p (format "Refresh entry from %s? This will replace existing content. " url))
+          (save-excursion
+            (org-with-point-at marker
+              (org-back-to-heading t)
+
+              ;; Clear old content but preserve structure
+              ;; Remove body content (everything after properties drawer)
+              (org-end-of-meta-data t)
+              (let ((body-start (point)))
+                (org-end-of-subtree t t)
+                (delete-region body-start (point)))
+
+              ;; Clear old metadata properties (keep structural ones)
+              (dolist (prop '("TITLE" "CREATOR" "PUBLISHER" "DATE" "TYPE"
+                            "LANGUAGE" "RIGHTS" "DESCRIPTION" "FORMAT"
+                            "SOURCE" "RELATION" "COVERAGE" "SUBJECT"
+                            "AI_MODEL" "PROCESSED_AT" "ERROR"))
+                (org-entry-delete nil prop))
+
+              ;; Clear old tags
+              (org-set-tags nil)
+
+              ;; Start fresh processing
+              (org-capture-ai--set-status marker "refreshing")
+              (org-capture-ai-fetch-url url
+                (lambda (html-content)
+                  (org-capture-ai--process-html html-content url marker))
+                (lambda (error)
+                  (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
+                  (set-marker marker nil)))))
+          (message "org-capture-ai: Refreshing %s" url))
       (message "org-capture-ai: No URL property found"))))
 
 ;;; Setup

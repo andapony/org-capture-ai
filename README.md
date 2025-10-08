@@ -184,15 +184,42 @@ Entries progress through these states:
 - `processing` - Calling LLM for analysis
 - `completed` - Successfully processed
 - `queued` - Waiting for batch processing
+- `reprocessing` - Manually reprocessing entry
+- `refreshing` - Refreshing entry (replacing content)
 - `error` - Processing failed (check ERROR property)
 - `fetch-error` - Failed to fetch URL
 
 ### Manual Reprocessing
 
-To reprocess a failed or outdated entry:
+**Reprocess (add to existing content):**
+
+To reprocess a failed entry or add new AI analysis without removing existing content:
 
 1. Navigate to the entry
 2. Run `M-x org-capture-ai-reprocess-entry`
+
+This will fetch the URL again and add new AI analysis, but won't remove your existing notes or content.
+
+**Refresh (replace all content):**
+
+To completely refresh an entry with updated content from the URL:
+
+1. Navigate to the entry
+2. Run `M-x org-capture-ai-refresh-entry`
+3. Confirm the refresh when prompted
+
+This will:
+- Clear the existing summary and body content
+- Clear all metadata properties and tags
+- Re-fetch the URL
+- Extract fresh metadata
+- Generate a new AI summary and tags
+- Replace the heading title
+
+Use this when:
+- The web page has been significantly updated
+- You want to remove old/incorrect information
+- You need a fresh analysis with current LLM capabilities
 
 ### Batch Processing
 
