@@ -26,9 +26,10 @@ All processing is asynchronous to avoid blocking Emacs UI.
 
 ### Key Components
 
-1. **HTML Processing Layer** (`org-capture-ai-fetch-url`, `org-capture-ai-extract-readable-content`)
+1. **HTML Processing Layer** (`org-capture-ai-fetch-url`, `org-capture-ai-extract-metadata`, `org-capture-ai-extract-readable-content`)
    - Async URL retrieval using `url-retrieve`
    - HTML parsing with `libxml-parse-html-region`
+   - Dublin Core metadata extraction (ISO 15836 standard)
    - Readability-style content extraction (removes ads, navigation, scripts)
 
 2. **LLM Integration Layer** (`org-capture-ai-llm-*`)
@@ -105,11 +106,18 @@ Edit `org-capture-ai-extract-readable-content`:
 
 ### Adding Custom Properties
 
-Properties are set in `org-capture-ai--llm-analyze`:
-```elisp
-(org-entry-put nil "PROPERTY_NAME" "value")
-```
+Properties are set in two places:
 
+1. **Dublin Core metadata** in `org-capture-ai--process-html`:
+```elisp
+(org-entry-put nil "CREATOR" author-name)
+```
+Follow [Dublin Core Element Set](https://www.dublincore.org/specifications/dublin-core/dces/) naming: TITLE, CREATOR, SUBJECT, DESCRIPTION, PUBLISHER, DATE, TYPE, FORMAT, IDENTIFIER, LANGUAGE, RIGHTS, SOURCE, RELATION, COVERAGE
+
+2. **AI-generated properties** in `org-capture-ai--llm-analyze`:
+```elisp
+(org-entry-put nil "AI_MODEL" (symbol-name gptel-model))
+```
 Follow naming convention: `AI_*` for LLM-generated, uppercase with underscores.
 
 ## Dependencies

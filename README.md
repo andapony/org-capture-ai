@@ -6,6 +6,7 @@ AI-enhanced URL capture for Emacs org-mode using LLMs. Automatically fetch web c
 
 - **Async Processing**: Non-blocking workflow that keeps Emacs responsive
 - **Smart Content Extraction**: Automatically removes ads, navigation, and other noise from web pages
+- **Dublin Core Metadata**: Extracts standardized metadata (ISO 15836) from web pages
 - **AI Summaries**: Generate concise summaries of captured web content
 - **Automatic Tagging**: Extract relevant topic tags using LLMs
 - **Batch Processing**: Queue entries for later processing during idle time
@@ -134,12 +135,45 @@ The entry will be automatically processed:
 :STATUS: completed
 :UPDATED_AT: [2025-10-04 Sat 14:32]
 :PROCESSED_AT: [2025-10-04 Sat 14:32]
-:EXTRACTED_TITLE: The Real Article Title from HTML
-:AI_SUMMARY: This article discusses the importance of async processing in Emacs. It provides practical examples of using gptel for LLM integration. The author demonstrates production-ready patterns for org-mode workflows.
-:AI_TAGS: emacs org-mode llm async-programming
-:AI_MODEL: claude-3-5-sonnet-20241022
+:TITLE: The Real Article Title from HTML
+:CREATOR: John Doe
+:PUBLISHER: example.com
+:DATE: 2025-10-01
+:TYPE: Text
+:LANGUAGE: en
+:FORMAT: text/html
+:DESCRIPTION: A brief description from the page's meta tags
+:SUBJECT: emacs, org-mode, llm, async-programming
+:AI_MODEL: claude-sonnet-4-5-20250929
 :END:
+
+This article discusses the importance of async processing in Emacs. It provides
+practical examples of using gptel for LLM integration. The author demonstrates
+production-ready patterns for org-mode workflows.
 ```
+
+### Dublin Core Properties
+
+org-capture-ai extracts metadata following the [Dublin Core Metadata Element Set](https://www.dublincore.org/specifications/dublin-core/dces/) (ISO 15836):
+
+| Property | Dublin Core Element | Description |
+|----------|-------------------|-------------|
+| `TITLE` | dc:title | Page title from HTML or meta tags |
+| `CREATOR` | dc:creator | Author name (from meta tags, byline, or schema.org) |
+| `SUBJECT` | dc:subject | AI-extracted topic keywords |
+| `DESCRIPTION` | dc:description | Meta description from page |
+| `PUBLISHER` | dc:publisher | Domain name or site name |
+| `DATE` | dc:date | Publication date (from meta tags or article) |
+| `TYPE` | dc:type | Resource type (usually "Text") |
+| `FORMAT` | dc:format | Media type (text/html, application/pdf) |
+| `IDENTIFIER` | dc:identifier | URL (stored in URL property) |
+| `LANGUAGE` | dc:language | Language code (from `<html lang>` attribute) |
+| `RIGHTS` | dc:rights | Copyright/license information |
+| `SOURCE` | dc:source | Original source if content is derived/reposted |
+| `RELATION` | dc:relation | Related resources |
+| `COVERAGE` | dc:coverage | Spatial or temporal coverage |
+
+Properties are only set when metadata is available in the source HTML.
 
 ### Status Values
 

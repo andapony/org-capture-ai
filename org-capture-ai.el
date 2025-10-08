@@ -154,19 +154,94 @@ Call ERROR-CALLBACK with error info on failure."
     (insert html-string)
     (libxml-parse-html-region (point-min) (point-max))))
 
-(defun org-capture-ai-extract-metadata (html)
-  "Extract title and description from HTML string."
-  (let ((dom (org-capture-ai-parse-html html)))
-    (list :title (or (when-let ((title-node (car (dom-by-tag dom 'title))))
-                       (string-trim (dom-texts title-node)))
-                     "Untitled")
-          :description (or (when-let ((meta-node
-                                      (car (dom-search dom
-                                             (lambda (node)
-                                               (and (eq (dom-tag node) 'meta)
-                                                    (equal (dom-attr node 'name) "description")))))))
-                            (dom-attr meta-node 'content))
-                          ""))))
+(defun org-capture-ai--get-meta-tag (dom name)
+  "Get content attribute from meta tag with NAME in DOM.
+Checks both name= and property= attributes."
+  (or (when-let ((meta-node
+                  (car (dom-search dom
+                         (lambda (node)
+                           (and (eq (dom-tag node) 'meta)
+                                (or (equal (dom-attr node 'name) name)
+                                    (equal (dom-attr node 'property) name))))))))
+        (string-trim (or (dom-attr meta-node 'content) "")))
+      nil))
+
+(defun org-capture-ai--extract-author (dom)
+  "Extract author/creator from DOM using multiple strategies."
+  (or
+   ;; Dublin Core meta tag
+   (org-capture-ai--get-meta-tag dom "DC.creator")
+   ;; Standard meta author
+   (org-capture-ai--get-meta-tag dom "author")
+   ;; Open Graph
+   (org-capture-ai--get-meta-tag dom "article:author")
+   ;; JSON-LD schema.org (simplified extraction)
+   (when-let ((script-nodes (dom-by-tag dom 'script)))
+     (catch 'found
+       (dolist (script script-nodes)
+         (when (equal (dom-attr script 'type) "application/ld+json")
+           (let ((json-text (dom-texts script)))
+             (when (string-match "\"author\"[[:space:]]*:[[:space:]]*\"\\([^\"]+\\)\"" json-text)
+               (throw 'found (match-string 1 json-text))))))
+       nil))
+   ;; HTML5 author link
+   (when-let ((author-link (car (dom-search dom
+                                   (lambda (node)
+                                     (and (eq (dom-tag node) 'a)
+                                          (equal (dom-attr node 'rel) "author")))))))
+     (string-trim (dom-texts author-link)))))
+
+(defun org-capture-ai--extract-date (dom)
+  "Extract publication date from DOM."
+  (or
+   ;; Dublin Core date
+   (org-capture-ai--get-meta-tag dom "DC.date")
+   ;; Open Graph article time
+   (org-capture-ai--get-meta-tag dom "article:published_time")
+   ;; Generic publish date
+   (org-capture-ai--get-meta-tag dom "date")
+   (org-capture-ai--get-meta-tag dom "pubdate")
+   ;; HTML5 time element
+   (when-let ((time-node (car (dom-by-tag dom 'time))))
+     (or (dom-attr time-node 'datetime)
+         (string-trim (dom-texts time-node))))))
+
+(defun org-capture-ai-extract-metadata (html url)
+  "Extract Dublin Core metadata from HTML string and URL.
+Returns a plist with Dublin Core elements."
+  (let* ((dom (org-capture-ai-parse-html html))
+         (parsed-url (url-generic-parse-url url))
+         (host (url-host parsed-url)))
+    (list
+     ;; Core fields
+     :title (or (org-capture-ai--get-meta-tag dom "DC.title")
+                (when-let ((title-node (car (dom-by-tag dom 'title))))
+                  (string-trim (dom-texts title-node)))
+                "Untitled")
+     :description (or (org-capture-ai--get-meta-tag dom "DC.description")
+                     (org-capture-ai--get-meta-tag dom "description")
+                     (org-capture-ai--get-meta-tag dom "og:description")
+                     "")
+
+     ;; Dublin Core elements
+     :creator (org-capture-ai--extract-author dom)
+     :publisher (or (org-capture-ai--get-meta-tag dom "DC.publisher")
+                   (org-capture-ai--get-meta-tag dom "og:site_name")
+                   host)
+     :date (org-capture-ai--extract-date dom)
+     :type (or (org-capture-ai--get-meta-tag dom "DC.type")
+              (org-capture-ai--get-meta-tag dom "og:type")
+              "Text")
+     :language (or (org-capture-ai--get-meta-tag dom "DC.language")
+                  (dom-attr (car (dom-by-tag dom 'html)) 'lang)
+                  "en")
+     :rights (or (org-capture-ai--get-meta-tag dom "DC.rights")
+                (org-capture-ai--get-meta-tag dom "copyright"))
+     :identifier url
+     :format "text/html"
+     :source (org-capture-ai--get-meta-tag dom "DC.source")
+     :relation (org-capture-ai--get-meta-tag dom "DC.relation")
+     :coverage (org-capture-ai--get-meta-tag dom "DC.coverage"))))
 
 (defun org-capture-ai-extract-readable-content (html)
   "Extract main readable content from HTML, filtering noise."
@@ -356,7 +431,7 @@ Update status at MARKER and call CALLBACK on success."
         (org-capture-ai-fetch-url url
           ;; Success callback
           (lambda (html-content)
-            (org-capture-ai--process-html html-content marker))
+            (org-capture-ai--process-html html-content url marker))
 
           ;; Error callback
           (lambda (error)
@@ -364,10 +439,10 @@ Update status at MARKER and call CALLBACK on success."
             (message "org-capture-ai: Failed to fetch URL: %s" error)
             (set-marker marker nil)))))))
 
-(defun org-capture-ai--process-html (html-content marker)
+(defun org-capture-ai--process-html (html-content url marker)
   "Extract content from HTML-CONTENT and send to LLM.
-Update entry at MARKER with results."
-  (let* ((metadata (org-capture-ai-extract-metadata html-content))
+URL is the source URL. Update entry at MARKER with results."
+  (let* ((metadata (org-capture-ai-extract-metadata html-content url))
          (clean-text (org-capture-ai-extract-readable-content html-content))
          (title (plist-get metadata :title)))
 
@@ -378,7 +453,31 @@ Update entry at MARKER with results."
       (org-with-point-at marker
         (org-back-to-heading t)
         (org-capture-ai--set-status marker "processing")
-        (org-entry-put nil "EXTRACTED_TITLE" title)))
+
+        ;; Set Dublin Core metadata properties
+        (org-entry-put nil "TITLE" title)
+        (when-let ((creator (plist-get metadata :creator)))
+          (org-entry-put nil "CREATOR" creator))
+        (when-let ((publisher (plist-get metadata :publisher)))
+          (org-entry-put nil "PUBLISHER" publisher))
+        (when-let ((date (plist-get metadata :date)))
+          (org-entry-put nil "DATE" date))
+        (when-let ((type (plist-get metadata :type)))
+          (org-entry-put nil "TYPE" type))
+        (when-let ((language (plist-get metadata :language)))
+          (org-entry-put nil "LANGUAGE" language))
+        (when-let ((rights (plist-get metadata :rights)))
+          (org-entry-put nil "RIGHTS" rights))
+        (when-let ((description (plist-get metadata :description)))
+          (org-entry-put nil "DESCRIPTION" description))
+        (when-let ((format (plist-get metadata :format)))
+          (org-entry-put nil "FORMAT" format))
+        (when-let ((source (plist-get metadata :source)))
+          (org-entry-put nil "SOURCE" source))
+        (when-let ((relation (plist-get metadata :relation)))
+          (org-entry-put nil "RELATION" relation))
+        (when-let ((coverage (plist-get metadata :coverage)))
+          (org-entry-put nil "COVERAGE" coverage))))
 
     ;; Process with LLM
     (org-capture-ai--log "About to call llm-analyze with %d chars" (length clean-text))
@@ -425,8 +524,8 @@ Update entry at MARKER with results."
                     (org-with-point-at marker
                       (org-back-to-heading t)
 
-                      ;; Save as property
-                      (org-entry-put nil "AI_TAGS" (mapconcat #'identity tags " "))
+                      ;; Save as SUBJECT (Dublin Core)
+                      (org-entry-put nil "SUBJECT" (mapconcat #'identity tags ", "))
 
                       ;; Also add as org tags
                       (org-set-tags (append (org-get-tags) tags))
@@ -460,7 +559,7 @@ Update entry at MARKER with results."
            ;; Fetch and process
            (org-capture-ai-fetch-url url
              (lambda (html-content)
-               (org-capture-ai--process-html html-content marker))
+               (org-capture-ai--process-html html-content url marker))
              (lambda (error)
                (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
                (set-marker marker nil))))))
@@ -478,7 +577,7 @@ Update entry at MARKER with results."
           (org-capture-ai--set-status marker "reprocessing")
           (org-capture-ai-fetch-url url
             (lambda (html-content)
-              (org-capture-ai--process-html html-content marker))
+              (org-capture-ai--process-html html-content url marker))
             (lambda (error)
               (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
               (set-marker marker nil)))
