@@ -32,7 +32,7 @@
 (use-package gptel
   :ensure t
   :custom
-  (gptel-model 'claude-3-5-sonnet-20241022)
+  (gptel-model 'claude-sonnet-4-5-20250929)
   :config
   (setq gptel-backend
         (gptel-make-anthropic "Claude"

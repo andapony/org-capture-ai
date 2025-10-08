@@ -107,6 +107,7 @@ FORMAT-STRING and ARGS are passed to `format'."
   (org-capture-ai--log "Setting status to %s at marker %s" status marker)
   (save-excursion
     (org-with-point-at marker
+      (org-back-to-heading t)
       (org-entry-put nil "STATUS" status)
       (org-entry-put nil "UPDATED_AT" (format-time-string "[%Y-%m-%d %a %H:%M]"))
       (when error-msg
@@ -186,7 +187,20 @@ Call ERROR-CALLBACK with error info on failure."
                          (car (dom-by-tag dom 'main))
                          (car (dom-by-tag dom 'body)))))
       (if main-node
-          (string-trim (dom-texts main-node))
+          ;; Clean up the text: trim, normalize whitespace, ensure valid UTF-8
+          (let ((text (string-trim (dom-texts main-node))))
+            ;; Remove non-printable characters and ensure UTF-8 compatibility
+            (with-temp-buffer
+              (insert text)
+              ;; Replace problematic characters
+              (goto-char (point-min))
+              (while (re-search-forward "[^\u0000-\u007F\u0080-\uFFFF]" nil t)
+                (replace-match "" nil nil))
+              ;; Normalize whitespace
+              (goto-char (point-min))
+              (while (re-search-forward "[ \t]+" nil t)
+                (replace-match " " nil nil))
+              (buffer-string)))
         ""))))
 
 ;;; LLM Integration
@@ -195,31 +209,58 @@ Call ERROR-CALLBACK with error info on failure."
   "Make LLM request with PROMPT and SYSTEM-MSG.
 Call CALLBACK with (response info) on completion.
 Response is nil on error."
-  (org-capture-ai--log "LLM request: %s" (substring system-msg 0 (min 50 (length system-msg))))
-  (gptel-request prompt
-    :system system-msg
-    :stream nil
-    :callback
-    (lambda (response info)
-      (if response
-          (org-capture-ai--log "LLM response received (%d chars)" (length response))
-        (org-capture-ai--log "LLM request failed: %s" (plist-get info :status)))
-      (funcall callback response info))))
+  (org-capture-ai--log "LLM request: %s (prompt length: %d chars)"
+                       (substring system-msg 0 (min 50 (length system-msg)))
+                       (length prompt))
+  (condition-case err
+      ;; Create a temporary buffer with UTF-8 encoding for gptel
+      (with-temp-buffer
+        (set-buffer-file-coding-system 'utf-8)
+        (insert prompt)
+        (gptel-request (buffer-substring-no-properties (point-min) (point-max))
+          :system system-msg
+          :stream nil
+          :callback
+          (lambda (response info)
+            (org-capture-ai--log "LLM callback fired! response=%s info=%s"
+                                 (if response "present" "nil")
+                                 info)
+            (if response
+                (org-capture-ai--log "LLM response received (%d chars)" (length response))
+              (org-capture-ai--log "LLM request failed: %s" (plist-get info :status)))
+            (funcall callback response info))))
+    (error
+     (org-capture-ai--log "Error in gptel-request: %s" err)
+     (funcall callback nil (list :status (format "error: %s" err))))))
 
 (defun org-capture-ai-llm-summarize (text callback &optional sentences)
   "Summarize TEXT using LLM.
-Call CALLBACK with summary string.
+Call CALLBACK with a plist containing :title and :summary.
 Optional SENTENCES overrides `org-capture-ai-summary-sentences'."
   (let ((sentence-count (or sentences org-capture-ai-summary-sentences)))
     (org-capture-ai-llm-request text
-      (format "Summarize this content in %d clear sentence%s. Focus on the main thesis and key insights."
-              sentence-count
-              (if (= sentence-count 1) "" "s"))
+      (format "Generate a title and summary for this content.
+
+Return your response in this exact format:
+TITLE: [A concise, descriptive title in 3-8 words]
+SUMMARY: [A %d-sentence summary focusing on the main thesis and key insights]
+
+Do not include any other text or formatting."
+              sentence-count)
       (lambda (response info)
-        (funcall callback
-                 (if response
-                     response
-                   (format "[Summarization failed: %s]" (plist-get info :status))))))))
+        (if response
+            (let ((title nil)
+                  (summary nil))
+              ;; Parse the response - match TITLE and everything after SUMMARY
+              (when (string-match "TITLE:\\s-*\\(.*?\\)\\s-*\nSUMMARY:\\s-*\\([^\000]*\\)" response)
+                (setq title (string-trim (match-string 1 response)))
+                (setq summary (string-trim (match-string 2 response))))
+              (funcall callback
+                       (if (and title summary)
+                           (list :title title :summary summary)
+                         ;; Fallback if parsing failed
+                         (list :title "Untitled" :summary response))))
+          (funcall callback nil))))))
 
 (defun org-capture-ai-llm-extract-tags (text callback &optional max-tags)
   "Extract tags from TEXT using LLM.
@@ -268,48 +309,60 @@ Update status at MARKER and call CALLBACK on success."
 
 (defun org-capture-ai--process-entry ()
   "Process the last captured URL entry with AI."
-  (when (and (not org-note-abort)
-             (equal (plist-get org-capture-plist :key)
-                    org-capture-ai-template-key))
-    (if org-capture-ai-process-on-capture
-        ;; Process immediately
-        (run-with-timer 0.1 nil #'org-capture-ai--async-process)
-      ;; Queue for later
-      (run-with-timer 0.1 nil #'org-capture-ai--mark-queued))))
+  (org-capture-ai--log "Hook fired. abort=%s plist=%s"
+                       org-note-abort
+                       org-capture-plist)
 
-(defun org-capture-ai--mark-queued ()
-  "Mark the last captured entry as queued."
+  ;; Check if this was a URL capture by checking the stored entry
+  (condition-case err
+      (save-excursion
+        (when (bookmark-get-bookmark "org-capture-last-stored" t)
+          (bookmark-jump "org-capture-last-stored")
+          (let ((url (org-entry-get nil "URL"))
+                (marker (point-marker)))  ; Create marker immediately
+            (org-capture-ai--log "Found URL property: %s url=%s marker=%s" url url marker)
+            (when (and url (not org-note-abort))
+              (org-capture-ai--log "Scheduling async process with marker %s" marker)
+              (if org-capture-ai-process-on-capture
+                  (run-with-timer 0.1 nil #'org-capture-ai--async-process marker)
+                (run-with-timer 0.1 nil #'org-capture-ai--mark-queued marker))))))
+    (error
+     (org-capture-ai--log "Error in process-entry: %s" err))))
+
+(defun org-capture-ai--mark-queued (marker)
+  "Mark the entry at MARKER as queued."
   (save-excursion
-    (bookmark-jump "org-capture-last-stored")
-    (org-entry-put nil "STATUS" "queued")
-    (org-capture-ai--log "Entry marked as queued")))
+    (org-with-point-at marker
+      (org-back-to-heading t)
+      (org-entry-put nil "STATUS" "queued")
+      (org-capture-ai--log "Entry marked as queued"))))
 
-(defun org-capture-ai--async-process ()
-  "Fetch URL and process with LLM asynchronously."
+(defun org-capture-ai--async-process (marker)
+  "Fetch URL and process with LLM asynchronously using MARKER."
   (save-excursion
-    (bookmark-jump "org-capture-last-stored")
-    (let ((url (org-entry-get nil "URL"))
-          (marker (point-marker)))
+    (org-with-point-at marker
+      (org-back-to-heading t)
+      (let ((url (org-entry-get nil "URL")))
 
-      (unless url
-        (org-capture-ai--log "No URL property found")
-        (message "org-capture-ai: No URL property found")
-        (cl-return-from org-capture-ai--async-process))
+        (unless url
+          (org-capture-ai--log "No URL property found")
+          (message "org-capture-ai: No URL property found")
+          (cl-return-from org-capture-ai--async-process))
 
-      (message "org-capture-ai: Fetching %s" url)
-      (org-capture-ai--set-status marker "fetching")
+        (message "org-capture-ai: Fetching %s" url)
+        (org-capture-ai--set-status marker "fetching")
 
-      ;; Fetch URL asynchronously
-      (org-capture-ai-fetch-url url
-        ;; Success callback
-        (lambda (html-content)
-          (org-capture-ai--process-html html-content marker))
+        ;; Fetch URL asynchronously
+        (org-capture-ai-fetch-url url
+          ;; Success callback
+          (lambda (html-content)
+            (org-capture-ai--process-html html-content marker))
 
-        ;; Error callback
-        (lambda (error)
-          (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
-          (message "org-capture-ai: Failed to fetch URL: %s" error)
-          (set-marker marker nil))))))
+          ;; Error callback
+          (lambda (error)
+            (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
+            (message "org-capture-ai: Failed to fetch URL: %s" error)
+            (set-marker marker nil)))))))
 
 (defun org-capture-ai--process-html (html-content marker)
   "Extract content from HTML-CONTENT and send to LLM.
@@ -323,45 +376,71 @@ Update entry at MARKER with results."
 
     (save-excursion
       (org-with-point-at marker
+        (org-back-to-heading t)
         (org-capture-ai--set-status marker "processing")
         (org-entry-put nil "EXTRACTED_TITLE" title)))
 
     ;; Process with LLM
+    (org-capture-ai--log "About to call llm-analyze with %d chars" (length clean-text))
     (org-capture-ai--llm-analyze clean-text marker)))
 
 (defun org-capture-ai--llm-analyze (text marker)
   "Analyze TEXT with LLM and update entry at MARKER."
-  ;; First: Generate summary
+  (org-capture-ai--log "llm-analyze called with marker: %s" marker)
+  ;; First: Generate title and summary
+  (org-capture-ai--log "Calling llm-summarize...")
   (org-capture-ai-llm-summarize text
-    (lambda (summary)
-      (when summary
-        (save-excursion
-          (org-with-point-at marker
-            (org-entry-put nil "AI_SUMMARY" summary)
-            (org-entry-put nil "AI_MODEL" (symbol-name gptel-model))))
+    (lambda (result)
+      (when result
+        (let ((title (plist-get result :title))
+              (summary (plist-get result :summary)))
+          (save-excursion
+            (org-with-point-at marker
+              (org-back-to-heading t)
 
-        ;; Second: Extract tags
-        (org-capture-ai-llm-extract-tags text
-          (lambda (tags)
-            (if tags
-                (save-excursion
-                  (org-with-point-at marker
-                    ;; Save as property
-                    (org-entry-put nil "AI_TAGS" (mapconcat #'identity tags " "))
+              ;; Update heading title
+              (when title
+                (let ((level (org-current-level)))
+                  (beginning-of-line)
+                  (looking-at org-complex-heading-regexp)
+                  (replace-match (concat (make-string level ?*) " " title) nil nil nil 0)))
 
-                    ;; Also add as org tags
-                    (org-set-tags (append (org-get-tags) tags))
+              ;; Add summary to body
+              (when summary
+                (org-end-of-meta-data t)
+                ;; Skip any existing blank lines
+                (while (and (looking-at "^[ \t]*$") (not (eobp)))
+                  (forward-line 1))
+                (unless (eobp)
+                  (beginning-of-line))
+                (insert summary "\n\n"))
 
-                    ;; Mark complete
-                    (org-capture-ai--set-status marker "completed")
-                    (org-entry-put nil "PROCESSED_AT"
-                                   (format-time-string "[%Y-%m-%d %a %H:%M]"))
+              (org-entry-put nil "AI_MODEL" (symbol-name gptel-model))))
 
-                    (message "org-capture-ai: Processing complete")))
-              (org-capture-ai--set-status marker "error" "Tag extraction failed"))
+          ;; Second: Extract tags
+          (org-capture-ai-llm-extract-tags text
+            (lambda (tags)
+              (if tags
+                  (save-excursion
+                    (org-with-point-at marker
+                      (org-back-to-heading t)
 
-            ;; Clean up marker
-            (set-marker marker nil)))))))
+                      ;; Save as property
+                      (org-entry-put nil "AI_TAGS" (mapconcat #'identity tags " "))
+
+                      ;; Also add as org tags
+                      (org-set-tags (append (org-get-tags) tags))
+
+                      ;; Mark complete
+                      (org-capture-ai--set-status marker "completed")
+                      (org-entry-put nil "PROCESSED_AT"
+                                     (format-time-string "[%Y-%m-%d %a %H:%M]"))
+
+                      (message "org-capture-ai: Processing complete")))
+                (org-capture-ai--set-status marker "error" "Tag extraction failed"))
+
+              ;; Clean up marker
+              (set-marker marker nil))))))))
 
 ;;; Batch Processing
 
@@ -419,9 +498,8 @@ Adds capture template and hooks."
                  "URL with AI"
                  entry
                  (file ,org-capture-ai-default-file)
-                 "* %^{Title}\n:PROPERTIES:\n:URL: %^{URL}\n:CAPTURED: %U\n:STATUS: processing\n:END:\n\n%?"
-                 :empty-lines 1
-                 :after-finalize org-capture-ai--process-entry))
+                 "* Processing...\n:PROPERTIES:\n:URL: %^{URL}\n:CAPTURED: %U\n:STATUS: processing\n:END:\n\n%?"
+                 :empty-lines 1))
 
   ;; Add hook
   (add-hook 'org-capture-after-finalize-hook #'org-capture-ai--process-entry)
