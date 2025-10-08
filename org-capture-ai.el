@@ -668,8 +668,8 @@ URL is the source URL. Update entry at MARKER with results."
                       ;; Save as SUBJECT (Dublin Core)
                       (org-entry-put nil "SUBJECT" (mapconcat #'identity tags ", "))
 
-                      ;; Also add as org tags
-                      (org-set-tags (append (org-get-tags) tags))
+                      ;; Also add as org tags (removing duplicates)
+                      (org-set-tags (delete-dups (append (org-get-tags) tags)))
 
                       ;; Mark complete
                       (org-capture-ai--set-status marker "completed")
