@@ -59,9 +59,9 @@ Only used when `org-capture-ai-summary-style' is 'sentences."
   :type 'integer
   :group 'org-capture-ai)
 
-(defcustom org-capture-ai-summary-style 'paragraphs
+(defcustom org-capture-ai-summary-style 'sentences
   "Style of AI-generated summaries.
-- 'sentences: Single paragraph with N sentences (legacy)
+- 'sentences: Single paragraph with N sentences (default)
 - 'paragraphs: Multi-paragraph with overview + topic sections"
   :type '(choice (const :tag "Single paragraph (sentences)" sentences)
                  (const :tag "Multi-paragraph (overview + topics)" paragraphs))
