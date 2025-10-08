@@ -106,11 +106,57 @@ This will:
 | `org-capture-ai-summary-overview-sentences` | `3` | Sentences in overview paragraph (when style is `'paragraphs`) |
 | `org-capture-ai-summary-topic-paragraphs` | `'auto` | Number of topic paragraphs (`'auto` or integer) |
 | `org-capture-ai-summary-topic-max-sentences` | `5` | Max sentences per topic paragraph |
-| `org-capture-ai-tag-count` | `5` | Maximum number of tags to extract |
+| `org-capture-ai-use-curated-tags` | `t` | Use curated faceted tags instead of free-form |
+| `org-capture-ai-tag-count` | `5` | Maximum tags (free-form mode only) |
+| `org-capture-ai-tags-type` | see below | Curated tags for content type/format |
+| `org-capture-ai-tags-status` | see below | Curated tags for status/lifecycle |
+| `org-capture-ai-tags-quality` | see below | Curated tags for quality/authority |
+| `org-capture-ai-tags-domain` | see below | Curated tags for domain/subject (customizable) |
 | `org-capture-ai-max-retries` | `3` | Retry attempts for failed LLM requests |
 | `org-capture-ai-enable-logging` | `t` | Enable logging to `*org-capture-ai-log*` |
 | `org-capture-ai-batch-idle-time` | `300` | Seconds before processing queued entries (nil to disable) |
 | `org-capture-ai-process-on-capture` | `t` | Process immediately (nil to queue for later) |
+
+### Faceted Tagging System
+
+org-capture-ai uses a **curated faceted tagging system** by default, based on research showing that action-oriented, multi-dimensional tags outperform free-form topic tags for long-term retrieval.
+
+**Facet 1: Type (Content Format)**
+- `article`, `tutorial`, `video`, `tool`, `reference`, `book`, `paper`, `course`
+- LLM selects 1 tag describing the content format
+
+**Facet 2: Status (Lifecycle/Action)**
+- `to-read`, `active`, `reference`, `implemented`, `archived`
+- LLM selects 1 tag indicating the current status (default: `to-read`)
+
+**Facet 3: Quality (Authority Level)**
+- `canonical`, `authoritative`, `exploratory`, `opinion`
+- LLM optionally selects 1 tag for notably authoritative content
+
+**Facet 4: Domain (Subject)**
+- Default: `programming`, `data-science`, `machine-learning`, `web-development`, `security`, `productivity`, `design`, `business`, `research`, `writing`, `health`, `finance`
+- LLM selects 1-3 tags matching the subject matter
+- **Customize this list** to match your personal interests
+
+Example bookmark tags: `article, to-read, canonical, programming, machine-learning`
+
+This faceted approach enables powerful queries like:
+- "Show me all tutorials I haven't read yet"
+- "Find canonical reference materials about programming"
+- "What active resources do I have for machine-learning?"
+
+**Customizing Domain Tags:**
+```elisp
+(setq org-capture-ai-tags-domain
+      '("emacs" "lisp" "org-mode" "ai" "nlp" "deep-learning"
+        "functional-programming" "databases" "devops"))
+```
+
+**Switching to Free-Form Tags:**
+```elisp
+(setq org-capture-ai-use-curated-tags nil
+      org-capture-ai-tag-count 5)
+```
 
 ### Summary Formats
 

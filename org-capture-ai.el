@@ -88,9 +88,43 @@ Used when `org-capture-ai-summary-style' is 'paragraphs."
   :type 'integer
   :group 'org-capture-ai)
 
+(defcustom org-capture-ai-use-curated-tags t
+  "Use curated faceted tag sets instead of free-form tags.
+When t, LLM selects from predefined tag lists organized by facets.
+When nil, LLM generates free-form tags."
+  :type 'boolean
+  :group 'org-capture-ai)
+
 (defcustom org-capture-ai-tag-count 5
-  "Maximum number of tags to extract."
+  "Maximum number of tags to extract.
+Only used when `org-capture-ai-use-curated-tags' is nil."
   :type 'integer
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-tags-type
+  '("article" "tutorial" "video" "tool" "reference" "book" "paper" "course")
+  "Curated tags for content type/format facet."
+  :type '(repeat string)
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-tags-status
+  '("to-read" "active" "reference" "implemented" "archived")
+  "Curated tags for status/lifecycle facet."
+  :type '(repeat string)
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-tags-quality
+  '("canonical" "authoritative" "exploratory" "opinion")
+  "Curated tags for quality/authority facet."
+  :type '(repeat string)
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-tags-domain
+  '("programming" "data-science" "machine-learning" "web-development" "security"
+    "productivity" "design" "business" "research" "writing" "health" "finance")
+  "Curated tags for domain/subject facet.
+Customize this list to match your personal interests and collection focus."
+  :type '(repeat string)
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-max-retries 3
@@ -407,13 +441,37 @@ Do not include any other text or formatting."
 (defun org-capture-ai-llm-extract-tags (text callback &optional max-tags)
   "Extract tags from TEXT using LLM.
 Call CALLBACK with list of tag strings.
-Optional MAX-TAGS overrides `org-capture-ai-tag-count'."
-  (let ((tag-count (or max-tags org-capture-ai-tag-count)))
-    (org-capture-ai-llm-request text
-      (format "Analyze this content and extract %d relevant topic tags.
+Optional MAX-TAGS overrides `org-capture-ai-tag-count'.
+Uses curated faceted tags if `org-capture-ai-use-curated-tags' is t."
+  (let* ((use-curated org-capture-ai-use-curated-tags)
+         (prompt (if use-curated
+                     ;; Curated faceted tags prompt
+                     (format "Analyze this content and select appropriate tags from these faceted lists:
+
+TYPE (select 1): %s
+STATUS (select 1): %s
+QUALITY (select 0-1): %s
+DOMAIN (select 1-3): %s
+
+Instructions:
+- Select ONE type tag that best describes the content format
+- Select ONE status tag (default: 'to-read' for new content)
+- Optionally select ONE quality tag if the content is notably authoritative or canonical
+- Select 1-3 domain tags that match the subject matter
+
+Return ONLY the selected tags as a comma-separated list.
+Example: article, to-read, canonical, programming, machine-learning"
+                             (mapconcat #'identity org-capture-ai-tags-type ", ")
+                             (mapconcat #'identity org-capture-ai-tags-status ", ")
+                             (mapconcat #'identity org-capture-ai-tags-quality ", ")
+                             (mapconcat #'identity org-capture-ai-tags-domain ", "))
+                   ;; Free-form tags prompt
+                   (let ((tag-count (or max-tags org-capture-ai-tag-count)))
+                     (format "Analyze this content and extract %d relevant topic tags.
 Return ONLY comma-separated tags (e.g., 'machine-learning, python, ai').
 No explanation, no extra formatting."
-              tag-count)
+                             tag-count)))))
+    (org-capture-ai-llm-request text prompt
       (lambda (response info)
         (if response
             (let ((tags (split-string (string-trim response) "," t)))
