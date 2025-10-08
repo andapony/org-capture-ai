@@ -101,12 +101,34 @@ This will:
 |----------|---------|-------------|
 | `org-capture-ai-default-file` | `"~/org/bookmarks.org"` | Target file for captures |
 | `org-capture-ai-template-key` | `"u"` | Capture template key |
-| `org-capture-ai-summary-sentences` | `3` | Number of sentences in summaries |
+| `org-capture-ai-summary-style` | `'paragraphs` | Summary format: `'sentences` (single) or `'paragraphs` (multi) |
+| `org-capture-ai-summary-sentences` | `3` | Sentences in single-paragraph summaries (when style is `'sentences`) |
+| `org-capture-ai-summary-overview-sentences` | `3` | Sentences in overview paragraph (when style is `'paragraphs`) |
+| `org-capture-ai-summary-topic-paragraphs` | `'auto` | Number of topic paragraphs (`'auto` or integer) |
+| `org-capture-ai-summary-topic-max-sentences` | `5` | Max sentences per topic paragraph |
 | `org-capture-ai-tag-count` | `5` | Maximum number of tags to extract |
 | `org-capture-ai-max-retries` | `3` | Retry attempts for failed LLM requests |
 | `org-capture-ai-enable-logging` | `t` | Enable logging to `*org-capture-ai-log*` |
 | `org-capture-ai-batch-idle-time` | `300` | Seconds before processing queued entries (nil to disable) |
 | `org-capture-ai-process-on-capture` | `t` | Process immediately (nil to queue for later) |
+
+### Summary Formats
+
+**Multi-paragraph (default):** `org-capture-ai-summary-style` = `'paragraphs`
+- First paragraph: Overview summarizing the entire article (3 sentences by default)
+- Following paragraphs: One per major topic (up to 5 sentences each)
+- LLM automatically determines number of topics (or specify with `org-capture-ai-summary-topic-paragraphs`)
+
+**Single paragraph (legacy):** `org-capture-ai-summary-style` = `'sentences`
+- One paragraph with N sentences (configured by `org-capture-ai-summary-sentences`)
+
+Example configuration for multi-paragraph summaries:
+```elisp
+(setq org-capture-ai-summary-style 'paragraphs
+      org-capture-ai-summary-overview-sentences 3
+      org-capture-ai-summary-topic-max-sentences 5
+      org-capture-ai-summary-topic-paragraphs 'auto)  ; or a number like 3
+```
 
 ## Usage
 

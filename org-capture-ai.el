@@ -54,7 +54,37 @@
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-summary-sentences 3
-  "Number of sentences for AI-generated summaries."
+  "Number of sentences for AI-generated summaries.
+Only used when `org-capture-ai-summary-style' is 'sentences."
+  :type 'integer
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-summary-style 'paragraphs
+  "Style of AI-generated summaries.
+- 'sentences: Single paragraph with N sentences (legacy)
+- 'paragraphs: Multi-paragraph with overview + topic sections"
+  :type '(choice (const :tag "Single paragraph (sentences)" sentences)
+                 (const :tag "Multi-paragraph (overview + topics)" paragraphs))
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-summary-overview-sentences 3
+  "Number of sentences in the overview paragraph.
+Used when `org-capture-ai-summary-style' is 'paragraphs."
+  :type 'integer
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-summary-topic-paragraphs 'auto
+  "Number of topic paragraphs to generate.
+Used when `org-capture-ai-summary-style' is 'paragraphs.
+- 'auto: Let the LLM decide based on article content
+- Integer: Request specific number of topic paragraphs"
+  :type '(choice (const :tag "Auto (LLM decides)" auto)
+                 (integer :tag "Fixed number"))
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-summary-topic-max-sentences 5
+  "Maximum sentences per topic paragraph.
+Used when `org-capture-ai-summary-style' is 'paragraphs."
   :type 'integer
   :group 'org-capture-ai)
 
@@ -316,17 +346,49 @@ Response is nil on error."
 (defun org-capture-ai-llm-summarize (text callback &optional sentences)
   "Summarize TEXT using LLM.
 Call CALLBACK with a plist containing :title and :summary.
-Optional SENTENCES overrides `org-capture-ai-summary-sentences'."
-  (let ((sentence-count (or sentences org-capture-ai-summary-sentences)))
-    (org-capture-ai-llm-request text
-      (format "Generate a title and summary for this content.
+Optional SENTENCES overrides `org-capture-ai-summary-sentences'.
+Uses `org-capture-ai-summary-style' to determine format."
+  (let* ((style org-capture-ai-summary-style)
+         (prompt (if (eq style 'paragraphs)
+                     ;; Multi-paragraph format
+                     (let ((overview-sentences org-capture-ai-summary-overview-sentences)
+                           (topic-max-sentences org-capture-ai-summary-topic-max-sentences)
+                           (topic-count org-capture-ai-summary-topic-paragraphs))
+                       (format "Generate a title and multi-paragraph summary for this content.
+
+Return your response in this exact format:
+TITLE: [A concise, descriptive title in 3-8 words]
+SUMMARY:
+[First paragraph: %d-sentence overview summarizing the entire article]
+
+[Second paragraph: Summary of first major topic, up to %d sentences]
+
+[Third paragraph: Summary of second major topic, up to %d sentences]
+%s
+IMPORTANT:
+- Each paragraph should be on its own line, separated by blank lines
+- First paragraph must be exactly %d sentences summarizing the whole article
+- Following paragraphs cover major topics, each up to %d sentences
+- Write naturally - each paragraph should flow well and be readable"
+                               overview-sentences
+                               topic-max-sentences
+                               topic-max-sentences
+                               (if (eq topic-count 'auto)
+                                   "\n[Continue with additional topic paragraphs as needed based on article complexity]"
+                                 (format "\n[Continue for %d total topic paragraphs]" topic-count))
+                               overview-sentences
+                               topic-max-sentences))
+                   ;; Single paragraph format (legacy)
+                   (let ((sentence-count (or sentences org-capture-ai-summary-sentences)))
+                     (format "Generate a title and summary for this content.
 
 Return your response in this exact format:
 TITLE: [A concise, descriptive title in 3-8 words]
 SUMMARY: [A %d-sentence summary focusing on the main thesis and key insights]
 
 Do not include any other text or formatting."
-              sentence-count)
+                             sentence-count)))))
+    (org-capture-ai-llm-request text prompt
       (lambda (response info)
         (if response
             (let ((title nil)
