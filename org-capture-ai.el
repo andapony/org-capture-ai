@@ -225,15 +225,20 @@ Call ERROR-CALLBACK with error info on failure."
 
 (defun org-capture-ai--get-meta-tag (dom name)
   "Get content attribute from meta tag with NAME in DOM.
-Checks both name= and property= attributes."
-  (or (when-let ((meta-node
-                  (car (dom-search dom
-                         (lambda (node)
-                           (and (eq (dom-tag node) 'meta)
-                                (or (equal (dom-attr node 'name) name)
-                                    (equal (dom-attr node 'property) name))))))))
-        (string-trim (or (dom-attr meta-node 'content) "")))
-      nil))
+Checks both name= and property= attributes.
+Returns nil if content is empty or malformed."
+  (when-let* ((meta-node
+               (car (dom-search dom
+                      (lambda (node)
+                        (and (eq (dom-tag node) 'meta)
+                             (or (equal (dom-attr node 'name) name)
+                                 (equal (dom-attr node 'property) name)))))))
+              (content (dom-attr meta-node 'content))
+              (cleaned (string-trim content)))
+    ;; Return nil if content looks corrupted (has replacement characters or is too short)
+    (when (and (> (length cleaned) 10)
+               (not (string-match-p "\uFFFD\\|�" cleaned)))
+      cleaned)))
 
 (defun org-capture-ai--extract-author (dom)
   "Extract author/creator from DOM using multiple strategies."
@@ -402,8 +407,10 @@ SUMMARY:
 IMPORTANT:
 - Each paragraph should be on its own line, separated by blank lines
 - First paragraph must be exactly %d sentences summarizing the whole article
+- The FIRST SENTENCE of the first paragraph must be a complete, grammatically correct sentence that stands alone as a clear, concise description
 - Following paragraphs cover major topics, each up to %d sentences
-- Write naturally - each paragraph should flow well and be readable"
+- Write naturally - each paragraph should flow well and be readable
+- Ensure proper punctuation and no truncation in all sentences"
                                overview-sentences
                                topic-max-sentences
                                topic-max-sentences
@@ -419,6 +426,8 @@ IMPORTANT:
 Return your response in this exact format:
 TITLE: [A concise, descriptive title in 3-8 words]
 SUMMARY: [A %d-sentence summary focusing on the main thesis and key insights]
+
+IMPORTANT: The first sentence of the SUMMARY must be a complete, grammatically correct sentence that stands alone as a clear description of the content. Ensure proper punctuation and no truncation.
 
 Do not include any other text or formatting."
                              sentence-count)))))
@@ -647,13 +656,12 @@ URL is the source URL. Update entry at MARKER with results."
                   ;; Fill the inserted text to wrap long lines
                   (fill-region start-pos (- (point) 2) nil t))
 
-                ;; Set DESCRIPTION property if not already set
-                ;; (use first sentence of AI summary as fallback for missing meta description)
-                (unless (org-entry-get nil "DESCRIPTION")
-                  (let ((first-sentence (if (string-match "^\\([^.!?]+[.!?]\\)" summary)
-                                            (match-string 1 summary)
-                                          summary)))
-                    (org-entry-put nil "DESCRIPTION" first-sentence))))
+                ;; Always set DESCRIPTION from AI summary (overwrites potentially corrupted HTML meta)
+                ;; Use first sentence of summary for clean, complete description
+                (let ((first-sentence (if (string-match "^\\([^.!?]+[.!?]\\)" summary)
+                                          (match-string 1 summary)
+                                        summary)))
+                  (org-entry-put nil "DESCRIPTION" first-sentence)))
 
               (org-entry-put nil "AI_MODEL" (symbol-name gptel-model))))
 

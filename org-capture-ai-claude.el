@@ -24,8 +24,13 @@
 
 ;;; Code:
 
-(require 'org-capture-ai)
-(require 'gptel)
+;; Require gptel first - fail with clear message if not installed
+(unless (require 'gptel nil t)
+  (error "gptel package not installed. Run: M-x package-install RET gptel RET"))
+
+;; Now require org-capture-ai
+(unless (require 'org-capture-ai nil t)
+  (error "org-capture-ai failed to load. Check that gptel is installed."))
 
 ;;;###autoload
 (defun org-capture-ai-init-claude (api-key &optional model)

@@ -12,7 +12,9 @@ This repository contains **org-capture-ai**, a complete Emacs library for AI-enh
 - `org-capture-ai-test.el` - ERT test suite
 - `README.md` - User documentation and installation guide
 - `examples/init-example.el` - Example configurations
-- `compass_artifact_wf-cde1f498-4f12-4f9e-ab11-d78f7be83f24_text_markdown.md` - Original technical guide
+- `org-capture-ai-implementation-guide.md` - Original technical implementation guide
+- `LLM-INTEGRATION.md` - Detailed documentation of LLM interaction and prompt engineering
+- `guide-bookmark-classification.md` - Comprehensive guide to bookmark classification systems
 
 ## Architecture
 
