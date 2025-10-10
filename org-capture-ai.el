@@ -43,7 +43,7 @@
   :group 'org
   :prefix "org-capture-ai-")
 
-(defcustom org-capture-ai-default-file "~/org/bookmarks.org"
+(defcustom org-capture-ai-default-file "~/Sync/org/bookmarks.org"
   "Default file for AI-enhanced URL captures."
   :type 'file
   :group 'org-capture-ai)

@@ -51,7 +51,7 @@ All processing happens asynchronously after the capture is finalized.
   :load-path "/path/to/org-capture-ai"
   :after (org-capture gptel)
   :custom
-  (org-capture-ai-default-file "~/org/bookmarks.org")
+  (org-capture-ai-default-file "~/Sync/org/bookmarks.org")
   (org-capture-ai-summary-sentences 3)
   (org-capture-ai-tag-count 5)
   :config
@@ -99,7 +99,7 @@ This will:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `org-capture-ai-default-file` | `"~/org/bookmarks.org"` | Target file for captures |
+| `org-capture-ai-default-file` | `"~/Sync/org/bookmarks.org"` | Target file for captures |
 | `org-capture-ai-template-key` | `"u"` | Capture template key |
 | `org-capture-ai-summary-style` | `'sentences` | Summary format: `'sentences` (single) or `'paragraphs` (multi) |
 | `org-capture-ai-summary-sentences` | `3` | Sentences in single-paragraph summaries (when style is `'sentences`) |

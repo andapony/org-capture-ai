@@ -20,7 +20,7 @@
   :load-path "~/path/to/org-capture-ai"
   :after (org-capture gptel)
   :custom
-  (org-capture-ai-default-file "~/org/bookmarks.org")
+  (org-capture-ai-default-file "~/Sync/org/bookmarks.org")
   (org-capture-ai-summary-sentences 3)
   (org-capture-ai-tag-count 5)
   :config
@@ -74,7 +74,7 @@
   :load-path "~/path/to/org-capture-ai"
   :after (org-capture gptel)
   :custom
-  (org-capture-ai-default-file "~/org/bookmarks.org")
+  (org-capture-ai-default-file "~/Sync/org/bookmarks.org")
   :config
   (org-capture-ai-setup))
 
@@ -84,7 +84,7 @@
   :load-path "~/path/to/org-capture-ai"
   :after (org-capture gptel)
   :custom
-  (org-capture-ai-default-file "~/org/bookmarks.org")
+  (org-capture-ai-default-file "~/Sync/org/bookmarks.org")
   (org-capture-ai-process-on-capture nil)  ; Queue for later processing
   (org-capture-ai-batch-idle-time 300)  ; Process queue every 5 minutes when idle
   :config
@@ -234,7 +234,7 @@ INFO contains :url and :title from the browser."
   :load-path "~/path/to/org-capture-ai"
   :after (org-capture gptel)
   :custom
-  (org-capture-ai-default-file "~/org/bookmarks.org")
+  (org-capture-ai-default-file "~/Sync/org/bookmarks.org")
   (org-capture-ai-process-on-capture nil)
   (org-capture-ai-batch-idle-time nil)  ; Disable batch processing
   :config

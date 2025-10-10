@@ -62,7 +62,7 @@ Templates can be functions that return template strings, enabling conditional fo
 
 (add-to-list 'org-capture-templates
              '("a" "AI-enhanced URL" entry
-               (file+headline "~/org/bookmarks.org" "Bookmarks")
+               (file+headline "~/Sync/org/bookmarks.org" "Bookmarks")
                (function my/ai-capture-template)))
 ```
 
@@ -537,7 +537,7 @@ Enable capturing from browser with automatic AI processing:
          (selection (plist-get info :body))
          (org-capture-entry
           `("p" "Protocol AI" entry
-            (file "~/org/bookmarks.org")
+            (file "~/Sync/org/bookmarks.org")
             ,(concat "* " title "\n"
                     ":PROPERTIES:\n"
                     ":URL: " url "\n"
