@@ -140,7 +140,7 @@ technology, education, health, finance, art, music, philosophy, history,
 politics, culture
 
 STATUS (choose 1):
-to-read, reference, archive, inspiration, cite
+to_read, reference, archive, inspiration, cite
 
 QUALITY (choose 0-1):
 authoritative, canonical, exploratory
@@ -180,11 +180,12 @@ When `org-capture-ai-use-curated-tags` is `nil`:
 ```
 Analyze this content and extract N relevant topic tags.
 
-Return ONLY comma-separated tags (e.g., 'machine-learning, python, tutorial').
+Return ONLY comma-separated tags (e.g., 'machine_learning, python, tutorial').
+Use underscores instead of hyphens for multi-word tags.
 No explanation, no extra formatting, no categories.
 
 Guidelines:
-- Use lowercase with hyphens for multi-word tags
+- Use lowercase with underscores for multi-word tags
 - Focus on concrete topics, technologies, and concepts
 - Avoid vague tags like "interesting" or "good"
 - Include both broad topics and specific details
@@ -192,7 +193,7 @@ Guidelines:
 
 **Design rationale:**
 
-- **Example format** - Shows hyphenation style
+- **Example format** - Shows underscore style for org-mode compatibility
 - **"ONLY comma-separated"** - Emphasizes simplicity
 - **Anti-patterns** - Explicitly discourages vague tags
 - **Balance guidance** - "broad topics and specific details"
@@ -466,8 +467,8 @@ org-capture-ai: Processing complete
 (setq org-capture-ai-enable-logging t)
 
 ;; Customize curated tag lists
-(setq org-capture-ai-curated-tags-domain
-      '("emacs" "lisp" "ai" "web-dev" "data-science"))
+(setq org-capture-ai-tags-domain
+      '("emacs" "lisp" "ai" "web_dev" "data_science"))
 ```
 
 ## Best Practices

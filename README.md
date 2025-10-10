@@ -126,24 +126,24 @@ org-capture-ai uses a **curated faceted tagging system** by default, based on re
 - LLM selects 1 tag describing the content format
 
 **Facet 2: Status (Lifecycle/Action)**
-- `to-read`, `active`, `reference`, `implemented`, `archived`
-- LLM selects 1 tag indicating the current status (default: `to-read`)
+- `to_read`, `active`, `reference`, `implemented`, `archived`
+- LLM selects 1 tag indicating the current status (default: `to_read`)
 
 **Facet 3: Quality (Authority Level)**
 - `canonical`, `authoritative`, `exploratory`, `opinion`
 - LLM optionally selects 1 tag for notably authoritative content
 
 **Facet 4: Domain (Subject)**
-- Default: `programming`, `data-science`, `machine-learning`, `web-development`, `security`, `productivity`, `design`, `business`, `research`, `writing`, `health`, `finance`
+- Default: `programming`, `data_science`, `machine_learning`, `web_development`, `security`, `productivity`, `design`, `business`, `research`, `writing`, `health`, `finance`
 - LLM selects 1-3 tags matching the subject matter
 - **Customize this list** to match your personal interests
 
-Example bookmark tags: `article, to-read, canonical, programming, machine-learning`
+Example bookmark tags: `article, to_read, canonical, programming, machine_learning`
 
 This faceted approach enables powerful queries like:
 - "Show me all tutorials I haven't read yet"
 - "Find canonical reference materials about programming"
-- "What active resources do I have for machine-learning?"
+- "What active resources do I have for machine_learning?"
 
 **Customizing Domain Tags:**
 ```elisp

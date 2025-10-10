@@ -108,7 +108,7 @@ Only used when `org-capture-ai-use-curated-tags' is nil."
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-tags-status
-  '("to-read" "active" "reference" "implemented" "archived")
+  '("to_read" "active" "reference" "implemented" "archived")
   "Curated tags for status/lifecycle facet."
   :type '(repeat string)
   :group 'org-capture-ai)
@@ -120,7 +120,7 @@ Only used when `org-capture-ai-use-curated-tags' is nil."
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-tags-domain
-  '("programming" "data-science" "machine-learning" "web-development" "security"
+  '("programming" "data_science" "machine_learning" "web_development" "security"
     "productivity" "design" "business" "research" "writing" "health" "finance")
   "Curated tags for domain/subject facet.
 Customize this list to match your personal interests and collection focus."
@@ -472,12 +472,12 @@ DOMAIN (select 1-3): %s
 
 Instructions:
 - Select ONE type tag that best describes the content format
-- Select ONE status tag (default: 'to-read' for new content)
+- Select ONE status tag (default: 'to_read' for new content)
 - Optionally select ONE quality tag if the content is notably authoritative or canonical
 - Select 1-3 domain tags that match the subject matter
 
 Return ONLY the selected tags as a comma-separated list.
-Example: article, to-read, canonical, programming, machine-learning"
+Example: article, to_read, canonical, programming, machine_learning"
                              (mapconcat #'identity org-capture-ai-tags-type ", ")
                              (mapconcat #'identity org-capture-ai-tags-status ", ")
                              (mapconcat #'identity org-capture-ai-tags-quality ", ")
@@ -485,14 +485,18 @@ Example: article, to-read, canonical, programming, machine-learning"
                    ;; Free-form tags prompt
                    (let ((tag-count (or max-tags org-capture-ai-tag-count)))
                      (format "Analyze this content and extract %d relevant topic tags.
-Return ONLY comma-separated tags (e.g., 'machine-learning, python, ai').
+Return ONLY comma-separated tags (e.g., 'machine_learning, python, ai').
+Use underscores instead of hyphens for multi-word tags.
 No explanation, no extra formatting."
                              tag-count)))))
     (org-capture-ai-llm-request text prompt
       (lambda (response info)
         (if response
             (let ((tags (split-string (string-trim response) "," t)))
-              (funcall callback (mapcar #'string-trim tags)))
+              ;; Clean tags: trim whitespace and replace hyphens with underscores
+              (funcall callback (mapcar (lambda (tag)
+                                          (replace-regexp-in-string "-" "_" (string-trim tag)))
+                                        tags)))
           (funcall callback nil))))))
 
 (defun org-capture-ai-llm-retry (text system-msg marker callback max-attempts)
