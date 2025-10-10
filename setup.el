@@ -52,7 +52,8 @@
 ;;; 6. Test the setup
 
 ;; Run: M-x org-capture, select "u" for URL capture
-;; Enter a URL and watch it process automatically
+;; Enter a URL - it will automatically finalize and process
+;; The file will auto-save when processing completes
 
 (provide 'setup)
 ;;; setup.el ends here

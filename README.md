@@ -183,10 +183,8 @@ Example configuration for multi-paragraph summaries:
 ### Basic Capture
 
 1. Press `C-c c u` (or your configured org-capture key + "u")
-2. Enter the page title
-3. Enter the URL
-4. Optionally add notes
-5. Press `C-c C-c` to finalize
+2. Enter the URL
+3. The capture automatically finalizes and begins processing
 
 The entry will be automatically processed:
 - URL fetched
@@ -194,6 +192,7 @@ The entry will be automatically processed:
 - Summary generated
 - Tags extracted
 - Properties updated
+- File auto-saved when complete
 
 ### Resulting Org Entry
 

@@ -409,8 +409,9 @@ loose and irresponsible way of building software with AIÁ¢ÀÀentirely prompt-
 
 1. **Filter at extraction** - Reject corrupted HTML meta descriptions:
 ```elisp
+;; Check for Unicode replacement character and common mojibake patterns
 (when (and (> (length cleaned) 10)
-           (not (string-match-p "\uFFFD\\|�" cleaned)))
+           (not (string-match-p "\uFFFD\\|�\\|Á¢À\\|â€\\|Ã¢â‚¬" cleaned)))
   cleaned)
 ```
 

@@ -172,7 +172,8 @@ FORMAT-STRING and ARGS are passed to `format'."
 ;;; Status Management
 
 (defun org-capture-ai--set-status (marker status &optional error-msg)
-  "Set STATUS at MARKER with optional ERROR-MSG."
+  "Set STATUS at MARKER with optional ERROR-MSG.
+Auto-saves buffer on terminal states (completed, error, fetch-error)."
   (org-capture-ai--log "Setting status to %s at marker %s" status marker)
   (save-excursion
     (org-with-point-at marker
@@ -180,7 +181,10 @@ FORMAT-STRING and ARGS are passed to `format'."
       (org-entry-put nil "STATUS" status)
       (org-entry-put nil "UPDATED_AT" (format-time-string "[%Y-%m-%d %a %H:%M]"))
       (when error-msg
-        (org-entry-put nil "ERROR" error-msg)))))
+        (org-entry-put nil "ERROR" error-msg))
+      ;; Auto-save on terminal states
+      (when (member status '("completed" "error" "fetch-error"))
+        (save-buffer)))))
 
 ;;; HTML Processing
 
@@ -236,8 +240,12 @@ Returns nil if content is empty or malformed."
               (content (dom-attr meta-node 'content))
               (cleaned (string-trim content)))
     ;; Return nil if content looks corrupted (has replacement characters or is too short)
+    ;; Check for:
+    ;; - Unicode replacement character (\uFFFD, �)
+    ;; - Common mojibake patterns (Á¢ÀÀ, â€", â€™, etc.)
+    ;; - Suspicious sequences of accented chars + symbols
     (when (and (> (length cleaned) 10)
-               (not (string-match-p "\uFFFD\\|�" cleaned)))
+               (not (string-match-p "\uFFFD\\|�\\|Á¢À\\|â€\\|Ã¢â‚¬" cleaned)))
       cleaned)))
 
 (defun org-capture-ai--extract-author (dom)
@@ -796,7 +804,8 @@ Adds capture template and hooks."
                  entry
                  (file ,org-capture-ai-default-file)
                  "* Processing...\n:PROPERTIES:\n:URL: %^{URL}\n:CAPTURED: %U\n:STATUS: processing\n:END:\n\n%?"
-                 :empty-lines 1))
+                 :empty-lines 1
+                 :immediate-finish t))
 
   ;; Add hook
   (add-hook 'org-capture-after-finalize-hook #'org-capture-ai--process-entry)

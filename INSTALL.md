@@ -46,7 +46,8 @@ After gptel is installed:
    ```
    M-x org-capture RET u RET
    ```
-   Enter a URL and watch it process.
+   Enter a URL - it will automatically finalize and begin processing.
+   The file auto-saves when processing completes.
 
 ## Debugging
 

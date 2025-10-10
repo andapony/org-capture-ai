@@ -99,8 +99,8 @@ Org-capture provides strategically placed hooks for different processing stages:
 ```elisp
 ;; 1. User initiates capture
 ;; 2. org-capture-mode-hook (buffer narrowed)
-;; 3. [User edits content]
-;; 4. User presses C-c C-c
+;; 3. [User edits content OR :immediate-finish t auto-finalizes]
+;; 4. User presses C-c C-c (or auto-finalize with :immediate-finish t)
 ;; 5. org-capture-prepare-finalize-hook (still narrowed)
 ;; 6. org-capture-before-finalize-hook (now widened)
 ;; 7. Content saved to target
