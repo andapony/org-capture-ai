@@ -108,7 +108,7 @@ Only used when `org-capture-ai-use-curated-tags' is nil."
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-tags-status
-  '("to_read" "active" "reference" "implemented" "archived")
+  '("active" "reference" "implemented" "archived")
   "Curated tags for status/lifecycle facet."
   :type '(repeat string)
   :group 'org-capture-ai)
@@ -500,12 +500,12 @@ DOMAIN (select 1-3): %s
 
 Instructions:
 - Select ONE type tag that best describes the content format
-- Select ONE status tag (default: 'to_read' for new content)
+- Select ONE status tag if applicable (default: 'reference' for new content)
 - Optionally select ONE quality tag if the content is notably authoritative or canonical
 - Select 1-3 domain tags that match the subject matter
 
 Return ONLY the selected tags as a comma-separated list.
-Example: article, to_read, canonical, programming, machine_learning"
+Example: article, reference, canonical, programming, artificial_intelligence"
                              (mapconcat #'identity org-capture-ai-tags-type ", ")
                              (mapconcat #'identity org-capture-ai-tags-status ", ")
                              (mapconcat #'identity org-capture-ai-tags-quality ", ")
