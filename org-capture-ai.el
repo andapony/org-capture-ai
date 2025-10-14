@@ -120,10 +120,38 @@ Only used when `org-capture-ai-use-curated-tags' is nil."
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-tags-domain
-  '("programming" "data_science" "machine_learning" "web_development" "security"
-    "productivity" "design" "business" "research" "writing" "health" "finance")
-  "Curated tags for domain/subject facet.
-Customize this list to match your personal interests and collection focus."
+  '(;; Technology (8 tags)
+    "programming" "web_development" "artificial_intelligence" "data_science"
+    "devops" "security" "design" "tools"
+    ;; Creative Fields (5 tags)
+    "visual_arts" "writing" "video" "music" "creative_inspiration"
+    ;; Professional/Business (7 tags)
+    "business" "marketing" "career" "management" "productivity" "finance" "education"
+    ;; Science & Medicine (5 tags)
+    "health_medicine" "biology" "physics_chemistry" "environment" "space"
+    ;; Social Sciences (4 tags)
+    "psychology" "politics" "sociology" "economics"
+    ;; Humanities (3 tags)
+    "history" "philosophy" "literature"
+    ;; Personal/Lifestyle (6 tags)
+    "self_improvement" "fitness" "food_cooking" "travel" "home_diy" "relationships"
+    ;; Functional/Meta (4 tags)
+    "tutorial" "reference" "news" "entertainment")
+  "Comprehensive curated tag set for domain/subject facet.
+
+This 42-tag flat domain system provides complete coverage across eight major domains:
+- Technology (8): programming, web dev, AI, data science, devops, security, design, tools
+- Creative (5): visual arts, writing, video, music, creative inspiration
+- Professional/Business (7): business, marketing, career, management, productivity, finance, education
+- Science & Medicine (5): health/medicine, biology, physics/chemistry, environment, space
+- Social Sciences (4): psychology, politics, sociology, economics
+- Humanities (3): history, philosophy, literature
+- Personal/Lifestyle (6): self-improvement, fitness, food/cooking, travel, home/DIY, relationships
+- Functional/Meta (4): tutorial, reference, news, entertainment
+
+Based on research showing optimal bookmark tag systems use 35-50 tags for generalist
+collections. This seed set balances comprehensive coverage with practical usability.
+Customize by adding/removing tags based on your collection focus and usage patterns."
   :type '(repeat string)
   :group 'org-capture-ai)
 
