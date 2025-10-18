@@ -43,7 +43,7 @@
   :group 'org
   :prefix "org-capture-ai-")
 
-(defcustom org-capture-ai-default-file "~/Sync/org/bookmarks.org"
+(defcustom org-capture-ai-default-file "~/Sync/bookmarks.org"
   "Default file for AI-enhanced URL captures."
   :type 'file
   :group 'org-capture-ai)
@@ -860,8 +860,8 @@ Adds capture template and hooks."
                `(,org-capture-ai-template-key
                  "URL with AI"
                  entry
-                 (file ,org-capture-ai-default-file)
-                 "* Processing...\n:PROPERTIES:\n:URL: %^{URL}\n:CAPTURED: %U\n:STATUS: processing\n:END:\n\n%?"
+                 (file+headline ,org-capture-ai-default-file "Bookmarks")
+                 "** Processing...\n:PROPERTIES:\n:URL: %^{URL}\n:CAPTURED: %U\n:STATUS: processing\n:END:\n\n%?"
                  :empty-lines 1
                  :immediate-finish t))
 
