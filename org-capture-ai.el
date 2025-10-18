@@ -216,38 +216,64 @@ Auto-saves buffer on terminal states (completed, error, fetch-error)."
 
 ;;; HTML Processing
 
-(defun org-capture-ai-fetch-url (url success-callback error-callback)
-  "Fetch URL asynchronously.
+(defun org-capture-ai-fetch-url (url success-callback error-callback &optional max-redirects)
+  "Fetch URL asynchronously, following redirects.
 Call SUCCESS-CALLBACK with HTML content on success.
-Call ERROR-CALLBACK with error info on failure."
-  (org-capture-ai--log "Fetching URL: %s" url)
-  (url-retrieve url
-    (lambda (status)
-      (let ((error-info (plist-get status :error)))
-        (if error-info
-            (progn
-              (org-capture-ai--log "Fetch error: %s" error-info)
-              (kill-buffer)
-              (funcall error-callback error-info))
+Call ERROR-CALLBACK with error info on failure.
+MAX-REDIRECTS limits redirect following (default 5)."
+  (let ((max-redirects (or max-redirects 5)))
+    (org-capture-ai--log "Fetching URL: %s (max redirects: %d)" url max-redirects)
+    (url-retrieve url
+      (lambda (status)
+        (let ((error-info (plist-get status :error)))
+          (if error-info
+              (progn
+                (org-capture-ai--log "Fetch error: %s" error-info)
+                (kill-buffer)
+                (funcall error-callback error-info))
 
-          ;; Check HTTP status code
-          (goto-char (point-min))
-          (if (re-search-forward "^HTTP/[0-9.]+ \\([0-9]+\\)" nil t)
-              (let ((status-code (string-to-number (match-string 1))))
-                (org-capture-ai--log "HTTP status: %d" status-code)
-                (if (and (>= status-code 200) (< status-code 300))
+            ;; Check HTTP status code
+            (goto-char (point-min))
+            (if (re-search-forward "^HTTP/[0-9.]+ \\([0-9]+\\)" nil t)
+                (let ((status-code (string-to-number (match-string 1))))
+                  (org-capture-ai--log "HTTP status: %d" status-code)
+                  (cond
+                   ;; Success - extract content
+                   ((and (>= status-code 200) (< status-code 300))
                     (progn
                       ;; Success - skip headers and extract body
                       (re-search-forward "^\r?\n\r?\n" nil t)
                       (let ((content (buffer-substring (point) (point-max))))
                         (kill-buffer)
-                        (funcall success-callback content)))
-                  ;; HTTP error
-                  (kill-buffer)
-                  (funcall error-callback (format "HTTP %d" status-code))))
-            ;; Couldn't parse response
-            (kill-buffer)
-            (funcall error-callback "Invalid HTTP response")))))))
+                        (funcall success-callback content))))
+
+                   ;; Redirect - follow Location header
+                   ((and (>= status-code 300) (< status-code 400))
+                    (if (> max-redirects 0)
+                        (progn
+                          ;; Extract Location header
+                          (goto-char (point-min))
+                          (if (re-search-forward "^[Ll]ocation: \\(.*\\)$" nil t)
+                              (let ((location (string-trim (match-string 1))))
+                                (org-capture-ai--log "Following redirect to: %s" location)
+                                (kill-buffer)
+                                ;; Recursively fetch the redirect location
+                                (org-capture-ai-fetch-url location success-callback error-callback (1- max-redirects)))
+                            ;; No Location header found
+                            (kill-buffer)
+                            (funcall error-callback (format "HTTP %d without Location header" status-code))))
+                      ;; Too many redirects
+                      (kill-buffer)
+                      (funcall error-callback "Too many redirects")))
+
+                   ;; HTTP error (4xx, 5xx)
+                   (t
+                    (kill-buffer)
+                    (funcall error-callback (format "HTTP %d" status-code)))))
+              ;; Couldn't parse response
+              (kill-buffer)
+              (funcall error-callback "Invalid HTTP response")))))
+      nil t))))
 
 (defun org-capture-ai-parse-html (html-string)
   "Parse HTML-STRING and return DOM tree."
