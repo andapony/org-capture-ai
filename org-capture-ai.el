@@ -216,38 +216,97 @@ Auto-saves buffer on terminal states (completed, error, fetch-error)."
 
 ;;; HTML Processing
 
-(defun org-capture-ai-fetch-url (url success-callback error-callback)
+(defcustom org-capture-ai-fetch-method 'curl
+  "Method to use for fetching URLs.
+- 'url-retrieve: Use Emacs built-in (fast, no dependencies, limited compatibility)
+- 'curl: Use external curl command (better compatibility, requires curl installed)"
+  :type '(choice (const :tag "Emacs url-retrieve" url-retrieve)
+                 (const :tag "External curl" curl))
+  :group 'org-capture-ai)
+
+(defun org-capture-ai-fetch-url (url success-cb error-cb)
   "Fetch URL asynchronously.
 Call SUCCESS-CALLBACK with HTML content on success.
 Call ERROR-CALLBACK with error info on failure."
-  (org-capture-ai--log "Fetching URL: %s" url)
-  (url-retrieve url
-    (lambda (status)
-      (let ((error-info (plist-get status :error)))
-        (if error-info
-            (progn
-              (org-capture-ai--log "Fetch error: %s" error-info)
-              (kill-buffer)
-              (funcall error-callback error-info))
+  (org-capture-ai--log "Fetching URL: %s (method: %s)" url org-capture-ai-fetch-method)
+  (cond
+   ((eq org-capture-ai-fetch-method 'curl)
+    (org-capture-ai-fetch-url-curl url success-cb error-cb))
+   (t
+    (org-capture-ai-fetch-url-builtin url success-cb error-cb))))
 
-          ;; Check HTTP status code
-          (goto-char (point-min))
-          (if (re-search-forward "^HTTP/[0-9.]+ \\([0-9]+\\)" nil t)
-              (let ((status-code (string-to-number (match-string 1))))
-                (org-capture-ai--log "HTTP status: %d" status-code)
-                (if (and (>= status-code 200) (< status-code 300))
-                    (progn
-                      ;; Success - skip headers and extract body
-                      (re-search-forward "^\r?\n\r?\n" nil t)
-                      (let ((content (buffer-substring (point) (point-max))))
-                        (kill-buffer)
-                        (funcall success-callback content)))
-                  ;; HTTP error
-                  (kill-buffer)
-                  (funcall error-callback (format "HTTP %d" status-code))))
-            ;; Couldn't parse response
-            (kill-buffer)
-            (funcall error-callback "Invalid HTTP response")))))))
+(defun org-capture-ai-fetch-url-curl (url success-cb error-cb)
+  "Fetch URL using external curl command."
+  (let* ((temp-file (make-temp-file "org-capture-ai-"))
+         (process (start-process
+                   "org-capture-ai-curl"
+                   nil
+                   "curl"
+                   "-L"  ; Follow redirects
+                   "-s"  ; Silent
+                   "-o" temp-file
+                   "-A" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                   url)))
+    (set-process-sentinel
+     process
+     (lambda (proc event)
+       (when (string-match "^finished" event)
+         (condition-case err
+             (with-temp-buffer
+               (insert-file-contents temp-file)
+               (let ((content (buffer-string)))
+                 (delete-file temp-file)
+                 (org-capture-ai--log "curl fetched: %d bytes" (length content))
+                 (funcall success-cb content)))
+           (error
+            (when (file-exists-p temp-file)
+              (delete-file temp-file))
+            (funcall error-cb (format "curl error: %s" err)))))
+       (when (string-match "^exited" event)
+         (unless (= 0 (process-exit-status proc))
+           (when (file-exists-p temp-file)
+             (delete-file temp-file))
+           (funcall error-cb (format "curl failed with exit code %d" (process-exit-status proc)))))))))
+
+(defun org-capture-ai-fetch-url-builtin (url success-cb error-cb)
+  "Fetch URL using Emacs built-in url-retrieve."
+  ;; Set User-Agent to help get full HTML from some sites
+  (let ((url-request-extra-headers
+         '(("User-Agent" . "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"))))
+    (url-retrieve url
+		  (lambda (status &rest cbargs)
+		    (let ((success-cb (car cbargs))
+			  (error-cb (cadr cbargs))
+			  (error-info (plist-get status :error))
+			  (redirect-url (plist-get status :redirect)))
+		      ;; Log redirect if present (url-retrieve automatically follows it)
+		      (when redirect-url
+			(org-capture-ai--log "Redirected to: %s" redirect-url))
+		      (if error-info
+			  (progn
+			    (org-capture-ai--log "Fetch error: %s" error-info)
+			    (kill-buffer)
+			    (funcall error-cb error-info))
+
+			;; Check HTTP status code
+			(goto-char (point-min))
+			(if (re-search-forward "^HTTP/[0-9.]+ \\([0-9]+\\)" nil t)
+			    (let ((status-code (string-to-number (match-string 1))))
+			      (org-capture-ai--log "HTTP status: %d" status-code)
+			      (if (and (>= status-code 200) (< status-code 300))
+				  (progn
+				    ;; Success - skip headers and extract body
+				    (re-search-forward "^\r?\n\r?\n" nil t)
+				    (let ((content (buffer-substring (point) (point-max))))
+				      (kill-buffer)
+				      (funcall success-cb content)))
+				;; HTTP error
+				(kill-buffer)
+				(funcall error-cb (format "HTTP %d" status-code))))
+			  ;; Couldn't parse response
+			  (kill-buffer)
+			  (funcall error-cb "Invalid HTTP response")))))
+		  (list success-cb error-cb))))
 
 (defun org-capture-ai-parse-html (html-string)
   "Parse HTML-STRING and return DOM tree."
@@ -661,9 +720,27 @@ URL is the source URL. Update entry at MARKER with results."
 (defun org-capture-ai--llm-analyze (text marker)
   "Analyze TEXT with LLM and update entry at MARKER."
   (org-capture-ai--log "llm-analyze called with marker: %s" marker)
-  ;; First: Generate title and summary
-  (org-capture-ai--log "Calling llm-summarize...")
-  (org-capture-ai-llm-summarize text
+
+  ;; Validate that we have content to analyze
+  (if (or (not text) (string-empty-p text) (< (length text) 50))
+      ;; Content too short or empty - fail gracefully
+      (progn
+        (org-capture-ai--log "Content too short or empty (%d chars), cannot analyze"
+                             (if text (length text) 0))
+        (save-excursion
+          (org-with-point-at marker
+            (org-back-to-heading t)
+            (org-entry-put nil "ERROR"
+                           (format "Content extraction failed - no readable text found (%d chars)"
+                                   (if text (length text) 0)))))
+        (org-capture-ai--set-status marker "error")
+        (message "org-capture-ai: No readable content found - check *org-capture-ai-log* for details")
+        (set-marker marker nil))
+
+    ;; Content is valid - proceed with LLM analysis
+    ;; First: Generate title and summary
+    (org-capture-ai--log "Calling llm-summarize...")
+    (org-capture-ai-llm-summarize text
     (lambda (result)
       (when result
         (let ((title (plist-get result :title))
@@ -728,7 +805,7 @@ URL is the source URL. Update entry at MARKER with results."
                 (org-capture-ai--set-status marker "error" "Tag extraction failed"))
 
               ;; Clean up marker
-              (set-marker marker nil))))))))
+              (set-marker marker nil)))))))))
 
 ;;; Batch Processing
 
