@@ -209,7 +209,7 @@ Auto-saves buffer on terminal states (completed, error, fetch-error)."
       (org-entry-put nil "STATUS" status)
       (org-entry-put nil "UPDATED_AT" (format-time-string "[%Y-%m-%d %a %H:%M]"))
       (when error-msg
-        (org-entry-put nil "ERROR" error-msg))
+        (org-entry-put nil "ERROR" (org-capture-ai--sanitize-property-value error-msg)))
       ;; Auto-save on terminal states
       (when (member status '("completed" "error" "fetch-error"))
         (save-buffer)))))
@@ -615,11 +615,12 @@ Update status at MARKER and call CALLBACK on success."
 
 ;;; Capture Integration
 
+(defvar org-capture-ai--processing-markers nil
+  "List of markers currently being processed to prevent duplicates.")
+
 (defun org-capture-ai--process-entry ()
   "Process the last captured URL entry with AI."
-  (org-capture-ai--log "Hook fired. abort=%s plist=%s"
-                       org-note-abort
-                       org-capture-plist)
+  (org-capture-ai--log "=== HOOK FIRED === abort=%s" org-note-abort)
 
   ;; Check if this was a URL capture by checking the stored entry
   (condition-case err
@@ -627,13 +628,25 @@ Update status at MARKER and call CALLBACK on success."
         (when (bookmark-get-bookmark "org-capture-last-stored" t)
           (bookmark-jump "org-capture-last-stored")
           (let ((url (org-entry-get nil "URL"))
+                (status (org-entry-get nil "STATUS"))
                 (marker (point-marker)))  ; Create marker immediately
-            (org-capture-ai--log "Found URL property: %s url=%s marker=%s" url url marker)
-            (when (and url (not org-note-abort))
+            (org-capture-ai--log "Found entry: url=%s status=%s marker=%s position=%d"
+                                url status marker (marker-position marker))
+
+            ;; Only process if: has URL, not aborted, status is "processing", and not already being processed
+            (when (and url
+                       (not org-note-abort)
+                       (equal status "processing")
+                       (not (member (marker-position marker) org-capture-ai--processing-markers)))
               (org-capture-ai--log "Scheduling async process with marker %s" marker)
+              (push (marker-position marker) org-capture-ai--processing-markers)
               (if org-capture-ai-process-on-capture
                   (run-with-timer 0.1 nil #'org-capture-ai--async-process marker)
-                (run-with-timer 0.1 nil #'org-capture-ai--mark-queued marker))))))
+                (run-with-timer 0.1 nil #'org-capture-ai--mark-queued marker)))
+
+            (when (member (marker-position marker) org-capture-ai--processing-markers)
+              (org-capture-ai--log "DUPLICATE PREVENTED: Entry at %d already being processed"
+                                  (marker-position marker))))))
     (error
      (org-capture-ai--log "Error in process-entry: %s" err))))
 
@@ -672,6 +685,23 @@ Update status at MARKER and call CALLBACK on success."
             (message "org-capture-ai: Failed to fetch URL: %s" error)
             (set-marker marker nil)))))))
 
+(defun org-capture-ai--sanitize-property-value (value)
+  "Sanitize VALUE for use in org-mode properties drawer.
+Properties must be single-line. This function:
+- Replaces newlines with spaces
+- Collapses multiple spaces into single space
+- Trims leading/trailing whitespace
+- Truncates to reasonable length (500 chars)"
+  (when value
+    (let ((sanitized (string-trim value)))
+      ;; Replace newlines and collapse whitespace
+      (setq sanitized (replace-regexp-in-string "[\n\r]+" " " sanitized))
+      (setq sanitized (replace-regexp-in-string "[ \t]+" " " sanitized))
+      ;; Truncate if too long
+      (when (> (length sanitized) 500)
+        (setq sanitized (concat (substring sanitized 0 497) "...")))
+      sanitized)))
+
 (defun org-capture-ai--process-html (html-content url marker)
   "Extract content from HTML-CONTENT and send to LLM.
 URL is the source URL. Update entry at MARKER with results."
@@ -687,31 +717,31 @@ URL is the source URL. Update entry at MARKER with results."
         (org-back-to-heading t)
         (org-capture-ai--set-status marker "processing")
 
-        ;; Set Dublin Core metadata properties
-        (org-entry-put nil "TITLE" title)
+        ;; Set Dublin Core metadata properties (sanitized for single-line)
+        (org-entry-put nil "TITLE" (org-capture-ai--sanitize-property-value title))
         (when-let ((creator (plist-get metadata :creator)))
-          (org-entry-put nil "CREATOR" creator))
+          (org-entry-put nil "CREATOR" (org-capture-ai--sanitize-property-value creator)))
         (when-let ((publisher (plist-get metadata :publisher)))
-          (org-entry-put nil "PUBLISHER" publisher))
+          (org-entry-put nil "PUBLISHER" (org-capture-ai--sanitize-property-value publisher)))
         (when-let ((date (plist-get metadata :date)))
-          (org-entry-put nil "DATE" date))
+          (org-entry-put nil "DATE" (org-capture-ai--sanitize-property-value date)))
         (when-let ((type (plist-get metadata :type)))
-          (org-entry-put nil "TYPE" type))
+          (org-entry-put nil "TYPE" (org-capture-ai--sanitize-property-value type)))
         (when-let ((language (plist-get metadata :language)))
-          (org-entry-put nil "LANGUAGE" language))
+          (org-entry-put nil "LANGUAGE" (org-capture-ai--sanitize-property-value language)))
         (when-let ((rights (plist-get metadata :rights)))
-          (org-entry-put nil "RIGHTS" rights))
+          (org-entry-put nil "RIGHTS" (org-capture-ai--sanitize-property-value rights)))
         (when-let ((description (plist-get metadata :description)))
           (when (not (string-empty-p description))
-            (org-entry-put nil "DESCRIPTION" description)))
+            (org-entry-put nil "DESCRIPTION" (org-capture-ai--sanitize-property-value description))))
         (when-let ((format (plist-get metadata :format)))
-          (org-entry-put nil "FORMAT" format))
+          (org-entry-put nil "FORMAT" (org-capture-ai--sanitize-property-value format)))
         (when-let ((source (plist-get metadata :source)))
-          (org-entry-put nil "SOURCE" source))
+          (org-entry-put nil "SOURCE" (org-capture-ai--sanitize-property-value source)))
         (when-let ((relation (plist-get metadata :relation)))
-          (org-entry-put nil "RELATION" relation))
+          (org-entry-put nil "RELATION" (org-capture-ai--sanitize-property-value relation)))
         (when-let ((coverage (plist-get metadata :coverage)))
-          (org-entry-put nil "COVERAGE" coverage))))
+          (org-entry-put nil "COVERAGE" (org-capture-ai--sanitize-property-value coverage)))))
 
     ;; Process with LLM
     (org-capture-ai--log "About to call llm-analyze with %d chars" (length clean-text))
@@ -731,8 +761,9 @@ URL is the source URL. Update entry at MARKER with results."
           (org-with-point-at marker
             (org-back-to-heading t)
             (org-entry-put nil "ERROR"
-                           (format "Content extraction failed - no readable text found (%d chars)"
-                                   (if text (length text) 0)))))
+                           (org-capture-ai--sanitize-property-value
+                            (format "Content extraction failed - no readable text found (%d chars)"
+                                    (if text (length text) 0))))))
         (org-capture-ai--set-status marker "error")
         (message "org-capture-ai: No readable content found - check *org-capture-ai-log* for details")
         (set-marker marker nil))
@@ -751,12 +782,10 @@ URL is the source URL. Update entry at MARKER with results."
 
               ;; Update heading title and TITLE property
               (when title
-                (let ((level (org-current-level)))
-                  (beginning-of-line)
-                  (looking-at org-complex-heading-regexp)
-                  (replace-match (concat (make-string level ?*) " " title) nil nil nil 0))
-                ;; Update TITLE property with AI-generated title
-                (org-entry-put nil "TITLE" title))
+                ;; Use org-edit-headline to properly update title while preserving tags
+                (org-edit-headline title)
+                ;; Update TITLE property with AI-generated title (sanitized)
+                (org-entry-put nil "TITLE" (org-capture-ai--sanitize-property-value title)))
 
               ;; Add summary to body
               (when summary
@@ -778,9 +807,9 @@ URL is the source URL. Update entry at MARKER with results."
                 (let ((first-sentence (if (string-match "^\\([^.!?]+[.!?]\\)" summary)
                                           (match-string 1 summary)
                                         summary)))
-                  (org-entry-put nil "DESCRIPTION" first-sentence)))
+                  (org-entry-put nil "DESCRIPTION" (org-capture-ai--sanitize-property-value first-sentence))))
 
-              (org-entry-put nil "AI_MODEL" (symbol-name gptel-model))))
+              (org-entry-put nil "AI_MODEL" (org-capture-ai--sanitize-property-value (symbol-name gptel-model)))))
 
           ;; Second: Extract tags
           (org-capture-ai-llm-extract-tags text
@@ -790,8 +819,10 @@ URL is the source URL. Update entry at MARKER with results."
                     (org-with-point-at marker
                       (org-back-to-heading t)
 
-                      ;; Save as SUBJECT (Dublin Core)
-                      (org-entry-put nil "SUBJECT" (mapconcat #'identity tags ", "))
+                      ;; Save as SUBJECT (Dublin Core) - sanitized
+                      (org-entry-put nil "SUBJECT"
+                                     (org-capture-ai--sanitize-property-value
+                                      (mapconcat #'identity tags ", ")))
 
                       ;; Also add as org tags (removing duplicates)
                       (org-set-tags (delete-dups (append (org-get-tags) tags)))
@@ -804,7 +835,10 @@ URL is the source URL. Update entry at MARKER with results."
                       (message "org-capture-ai: Processing complete")))
                 (org-capture-ai--set-status marker "error" "Tag extraction failed"))
 
-              ;; Clean up marker
+              ;; Clean up marker and remove from processing list
+              (setq org-capture-ai--processing-markers
+                    (delq (marker-position marker) org-capture-ai--processing-markers))
+              (org-capture-ai--log "Removed marker %d from processing list" (marker-position marker))
               (set-marker marker nil)))))))))
 
 ;;; Batch Processing
@@ -916,7 +950,8 @@ Adds capture template and hooks."
                  :empty-lines 1
                  :immediate-finish t))
 
-  ;; Add hook
+  ;; Add hook (remove first to ensure it's only added once, making setup idempotent)
+  (remove-hook 'org-capture-after-finalize-hook #'org-capture-ai--process-entry)
   (add-hook 'org-capture-after-finalize-hook #'org-capture-ai--process-entry)
 
   ;; Set up batch processing timer if configured

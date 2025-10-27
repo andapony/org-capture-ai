@@ -1,0 +1,2 @@
+TITLE: Understanding Emacs Buffers
+SUMMARY: This comprehensive guide explains the fundamental concept of buffers in Emacs. Buffers are in-memory workspaces that exist independently of files. The article covers buffer management, switching between buffers, buffer-local variables, and advanced manipulation techniques essential for efficient Emacs usage.
