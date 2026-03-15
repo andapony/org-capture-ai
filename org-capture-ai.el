@@ -404,6 +404,7 @@ for broader compatibility.  See `org-capture-ai-fetch-method'."
 			  (funcall error-cb "Invalid HTTP response")))))
 		  (list success-cb error-cb))))
 
+
 (defun org-capture-ai-parse-html (html-string)
   "Parse HTML-STRING into a DOM tree using `libxml-parse-html-region'.
 Returns a DOM tree suitable for use with `dom-by-tag', `dom-attr', etc."
@@ -834,10 +835,11 @@ initiates an async fetch via `org-capture-ai-fetch-url'.
 On fetch success, continues with `org-capture-ai--process-html'.
 On fetch failure, sets STATUS to \"fetch-error\" and cleans up MARKER.
 Returns early with a log message if the entry has no URL property."
-  (save-excursion
-    (org-with-point-at marker
-      (org-back-to-heading t)
-      (let ((url (org-entry-get nil "URL")))
+  (cl-block org-capture-ai--async-process
+    (save-excursion
+      (org-with-point-at marker
+        (org-back-to-heading t)
+        (let ((url (org-entry-get nil "URL")))
 
         (unless url
           (org-capture-ai--log "No URL property found")
@@ -873,7 +875,7 @@ Returns early with a log message if the entry has no URL property."
           (lambda (error)
             (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
             (message "org-capture-ai: Failed to fetch URL: %s" error)
-            (set-marker marker nil)))))))
+            (set-marker marker nil))))))))
 
 (defun org-capture-ai--sanitize-property-value (value)
   "Sanitize VALUE for storage as an org-mode property.
@@ -1074,7 +1076,7 @@ invalidates it."
                                            (org-capture-ai--sanitize-property-value
                                             (mapconcat #'identity takeaways " | "))))))
                       (org-capture-ai--finalize-entry marker tags)))
-                (org-capture-ai--finalize-entry marker tags)))))))))
+                (org-capture-ai--finalize-entry marker tags))))))))))
 
 ;;; Batch Processing
 
@@ -1083,6 +1085,7 @@ invalidates it."
 Respects `org-capture-ai-batch-concurrency' to avoid overwhelming the LLM API.
 Files searched are `org-capture-ai-files', defaulting to `org-capture-ai-default-file'."
   (interactive)
+  (cl-block org-capture-ai-process-queued
   ;; Guard against concurrent invocations (e.g. idle timer firing during a running batch)
   (when (> org-capture-ai--active-fetch-count 0)
     (message "org-capture-ai: Batch already running (%d active), skipping"
@@ -1108,7 +1111,7 @@ Files searched are `org-capture-ai-files', defaulting to `org-capture-ai-default
       (setq org-capture-ai--active-fetch-count 0)
       ;; Seed the queue — dispatch-next's guard handles the concurrency limit
       (dotimes (_ org-capture-ai-batch-concurrency)
-        (org-capture-ai--batch-dispatch-next)))))
+        (org-capture-ai--batch-dispatch-next))))))
 
 (defun org-capture-ai--batch-dispatch-next ()
   "Start processing the next pending batch entry if below concurrency limit.

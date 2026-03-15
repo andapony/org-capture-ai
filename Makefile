@@ -29,7 +29,7 @@ test-integration:
 	./run-tests.sh integration
 
 check:
-	@output=$$($(EMACS) --batch \
+	@output=$$($(EMACS) --batch --no-site-file \
 		-L . \
 		-L $(GPTEL_DIR) \
 		-f batch-byte-compile \

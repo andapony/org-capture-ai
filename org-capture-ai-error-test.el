@@ -149,7 +149,7 @@
        (should (equal "completed" (org-entry-get nil "STATUS" marker)))
 
        ;; Properties drawer should be intact
-       (should (= 1 (org-capture-ai-test--count-properties-drawers))))))))
+       (should (= 1 (org-capture-ai-test--count-properties-drawers)))))))
 
 (ert-deftest org-capture-ai-error-test-special-characters ()
   "Test handling of special characters in metadata."

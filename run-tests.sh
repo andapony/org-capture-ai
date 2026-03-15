@@ -1,7 +1,8 @@
 #!/bin/bash
 # run-tests.sh - Run all org-capture-ai tests
 
-set -e  # Exit on error
+set -e          # Exit on error
+set -o pipefail # Propagate pipeline failures (so `emacs ... | tee` reports emacs exit code)
 
 # Colors for output
 RED='\033[0;31m'
@@ -28,7 +29,7 @@ run_test_file() {
 
     echo -e "${YELLOW}Running: $test_name${NC}"
 
-    if emacs --batch \
+    if emacs --batch --no-site-file \
         -L . \
         -L test-deps/gptel \
         -l "$test_file" \
