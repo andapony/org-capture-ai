@@ -177,6 +177,14 @@ If nil, entries will be marked as queued for later batch processing."
   :type 'boolean
   :group 'org-capture-ai)
 
+(defcustom org-capture-ai-max-content-length 50000
+  "Maximum characters of page content to send to the LLM.
+Content exceeding this length is truncated before LLM analysis.
+Default 50000 chars is approximately 12500 tokens, well within
+most LLM context limits while covering the vast majority of articles."
+  :type 'integer
+  :group 'org-capture-ai)
+
 ;;; Internal Variables
 
 (defvar org-capture-ai--batch-timer nil
@@ -706,6 +714,12 @@ URL is the source URL. Update entry at MARKER with results."
 
     (org-capture-ai--log "Extracted %d chars of text, title: %s"
                          (length clean-text) title)
+
+    ;; Truncate content if it exceeds the configured maximum
+    (when (> (length clean-text) org-capture-ai-max-content-length)
+      (org-capture-ai--log "Truncating content from %d to %d chars (org-capture-ai-max-content-length)"
+                           (length clean-text) org-capture-ai-max-content-length)
+      (setq clean-text (substring clean-text 0 org-capture-ai-max-content-length)))
 
     (save-excursion
       (org-with-point-at marker
