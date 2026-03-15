@@ -233,37 +233,48 @@ Call ERROR-CALLBACK with error info on failure."
     (org-capture-ai-fetch-url-builtin url success-cb error-cb))))
 
 (defun org-capture-ai-fetch-url-curl (url success-cb error-cb)
-  "Fetch URL using external curl command."
+  "Fetch URL using external curl command.
+Uses make-process for stderr capture. Enforces 30-second timeout."
   (let* ((temp-file (make-temp-file "org-capture-ai-"))
-         (process (start-process
-                   "org-capture-ai-curl"
-                   nil
-                   "curl"
-                   "-L"  ; Follow redirects
-                   "-s"  ; Silent
-                   "-o" temp-file
-                   "-A" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                   url)))
-    (set-process-sentinel
-     process
+         (err-buffer (generate-new-buffer " *org-capture-ai-curl-err*")))
+    (make-process
+     :name "org-capture-ai-curl"
+     :buffer nil
+     :stderr err-buffer
+     :command (list "curl"
+                    "-L"            ; Follow redirects
+                    "-s"            ; Silent (no progress)
+                    "--max-time" "30"  ; 30-second timeout
+                    "-o" temp-file
+                    "-A" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    url)
+     :sentinel
      (lambda (proc event)
-       (when (string-match "^finished" event)
+       (cond
+        ((string-match "^finished" event)
          (condition-case err
              (with-temp-buffer
                (insert-file-contents temp-file)
                (let ((content (buffer-string)))
                  (delete-file temp-file)
+                 (when (buffer-live-p err-buffer) (kill-buffer err-buffer))
                  (org-capture-ai--log "curl fetched: %d bytes" (length content))
                  (funcall success-cb content)))
            (error
-            (when (file-exists-p temp-file)
-              (delete-file temp-file))
-            (funcall error-cb (format "curl error: %s" err)))))
-       (when (string-match "^exited" event)
-         (unless (= 0 (process-exit-status proc))
-           (when (file-exists-p temp-file)
-             (delete-file temp-file))
-           (funcall error-cb (format "curl failed with exit code %d" (process-exit-status proc)))))))))
+            (when (file-exists-p temp-file) (delete-file temp-file))
+            (when (buffer-live-p err-buffer) (kill-buffer err-buffer))
+            (funcall error-cb (format "curl read error: %s" err)))))
+        ((string-match "\\(exited\\|signal\\|killed\\)" event)
+         (let ((err-msg (if (buffer-live-p err-buffer)
+                            (with-current-buffer err-buffer
+                              (string-trim (buffer-string)))
+                          "")))
+           (when (file-exists-p temp-file) (delete-file temp-file))
+           (when (buffer-live-p err-buffer) (kill-buffer err-buffer))
+           (funcall error-cb
+                    (if (string-empty-p err-msg)
+                        (format "curl failed: %s" (string-trim event))
+                      (format "curl error: %s" err-msg)))))))))
 
 (defun org-capture-ai-fetch-url-builtin (url success-cb error-cb)
   "Fetch URL using Emacs built-in url-retrieve."
