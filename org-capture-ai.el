@@ -216,6 +216,27 @@ risk of hitting API rate limits."
   :type 'integer
   :group 'org-capture-ai)
 
+(defcustom org-capture-ai-duplicate-action 'warn
+  "Action to take when capturing a URL that already exists as a completed entry.
+- `warn': Log a warning and continue processing (default).  The new entry
+  will be processed normally; the user is notified via the log and echo area.
+- `skip': Set STATUS to \"duplicate\" and stop processing immediately.  Use
+  this to avoid storing identical bookmarks.
+- `update': Continue processing normally (same as `warn') — reserved for
+  a future update-in-place implementation."
+  :type '(choice (const :tag "Warn and continue" warn)
+                 (const :tag "Skip (set STATUS=duplicate)" skip)
+                 (const :tag "Update existing entry" update))
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-extract-takeaways t
+  "When non-nil, extract 3-5 key takeaways in addition to summary and tags.
+Takeaways are stored in the TAKEAWAYS property as pipe-separated sentences.
+Each takeaway is a single sentence distilling one important insight.
+Set to nil to disable this step and reduce LLM API call count by one."
+  :type 'boolean
+  :group 'org-capture-ai)
+
 ;;; Internal Variables
 
 (defvar org-capture-ai--batch-timer nil
@@ -258,7 +279,7 @@ Saves the buffer automatically when STATUS is a terminal value:
       (when error-msg
         (org-entry-put nil "ERROR" (org-capture-ai--sanitize-property-value error-msg)))
       ;; Auto-save on terminal states
-      (when (member status '("completed" "error" "fetch-error"))
+      (when (member status '("completed" "error" "fetch-error" "duplicate"))
         (save-buffer)))))
 
 ;;; HTML Processing
@@ -710,6 +731,29 @@ No explanation, no extra formatting."
                                         tags)))
           (funcall callback nil))))))
 
+(defun org-capture-ai-llm-extract-takeaways (text callback)
+  "Extract 3-5 key takeaways from TEXT using the configured LLM.
+Calls CALLBACK with a list of takeaway strings on success, or nil on failure.
+Each takeaway is a single sentence distilling one important insight.
+The LLM is asked to return a numbered list; lines not matching the
+numbered-list pattern are silently discarded."
+  (let ((prompt "Extract 3-5 key takeaways from this content.
+Each takeaway must be a single, self-contained sentence capturing one important insight.
+Return ONLY a numbered list, one takeaway per line, no extra text.
+Example format:
+1. First key insight as a complete sentence.
+2. Second key insight as a complete sentence.
+3. Third key insight as a complete sentence."))
+    (org-capture-ai-llm-request text prompt
+      (lambda (response _info)
+        (if response
+            (let ((takeaways nil))
+              (dolist (line (split-string (string-trim response) "\n" t))
+                (when (string-match "^[0-9]+\\.[ \t]+\\(.*\\)" line)
+                  (push (string-trim (match-string 1 line)) takeaways)))
+              (funcall callback (nreverse takeaways)))
+          (funcall callback nil))))))
+
 ;;; Capture Integration
 
 (defvar org-capture-ai--processing-markers nil
@@ -766,6 +810,23 @@ either invoked manually or automatically via the idle timer."
       (org-entry-put nil "STATUS" "queued")
       (org-capture-ai--log "Entry marked as queued"))))
 
+(defun org-capture-ai--find-duplicate (url)
+  "Search configured files for a completed entry whose URL property equals URL.
+Returns the heading title string of the first match, or nil if none found.
+Only entries with STATUS=completed are considered duplicates; entries that
+are still processing, queued, or errored are ignored."
+  (let ((files (or org-capture-ai-files (list org-capture-ai-default-file)))
+        (result nil))
+    (dolist (file files)
+      (when (and (file-exists-p file) (not result))
+        (org-map-entries
+         (lambda ()
+           (when (equal (org-entry-get nil "URL") url)
+             (setq result (org-get-heading t t t t))))
+         "STATUS=\"completed\""
+         (list file))))
+    result))
+
 (defun org-capture-ai--async-process (marker)
   "Begin async fetch-and-analyze processing for the entry at MARKER.
 Reads the URL property from the entry, sets STATUS to \"fetching\", and
@@ -782,6 +843,22 @@ Returns early with a log message if the entry has no URL property."
           (org-capture-ai--log "No URL property found")
           (message "org-capture-ai: No URL property found")
           (cl-return-from org-capture-ai--async-process))
+
+        ;; Check for duplicate before fetching
+        (when-let ((dup-heading (org-capture-ai--find-duplicate url)))
+          (org-capture-ai--log "Duplicate URL detected: %s (existing: \"%s\")"
+                               url dup-heading)
+          (pcase org-capture-ai-duplicate-action
+            ('skip
+             (org-capture-ai--set-status marker "duplicate")
+             (setq org-capture-ai--processing-markers
+                   (delq (marker-position marker) org-capture-ai--processing-markers))
+             (set-marker marker nil)
+             (message "org-capture-ai: Duplicate URL skipped (already captured: \"%s\")"
+                      dup-heading)
+             (cl-return-from org-capture-ai--async-process))
+            ((or 'warn 'update)
+             (message "org-capture-ai: Warning: URL already captured as \"%s\"" dup-heading))))
 
         (message "org-capture-ai: Fetching %s" url)
         (org-capture-ai--set-status marker "fetching")
@@ -871,17 +948,41 @@ characters before being sent to the LLM."
     (org-capture-ai--log "About to call llm-analyze with %d chars" (length clean-text))
     (org-capture-ai--llm-analyze clean-text marker)))
 
+(defun org-capture-ai--finalize-entry (marker tags)
+  "Complete LLM processing for the entry at MARKER.
+Sets STATUS to \"completed\" and records PROCESSED_AT when TAGS is non-nil.
+Sets STATUS to \"error\" when TAGS is nil (tag extraction failed).
+In all cases, removes MARKER from `org-capture-ai--processing-markers'
+and invalidates it."
+  (if tags
+      (progn
+        (org-capture-ai--set-status marker "completed")
+        (save-excursion
+          (org-with-point-at marker
+            (org-back-to-heading t)
+            (org-entry-put nil "PROCESSED_AT"
+                           (format-time-string "[%Y-%m-%d %a %H:%M]"))))
+        (message "org-capture-ai: Processing complete"))
+    (org-capture-ai--set-status marker "error" "Tag extraction failed"))
+  (setq org-capture-ai--processing-markers
+        (delq (marker-position marker) org-capture-ai--processing-markers))
+  (org-capture-ai--log "Removed marker %d from processing list" (marker-position marker))
+  (set-marker marker nil))
+
 (defun org-capture-ai--llm-analyze (text marker)
   "Analyze TEXT with the LLM and update the entry at MARKER.
 Fails immediately with STATUS \"error\" if TEXT is empty or shorter than
 50 characters, indicating that content extraction found nothing usable.
-Otherwise runs two sequential LLM calls:
+Otherwise runs up to three sequential LLM calls:
 1. `org-capture-ai-llm-summarize': generates a title and summary.
    Updates the heading text, TITLE property, entry body, DESCRIPTION
    property (first sentence of summary), and AI_MODEL property.
 2. `org-capture-ai-llm-extract-tags': extracts classification tags.
    Stores them in the SUBJECT property (comma-separated) and as org
    headline tags.
+3. `org-capture-ai-llm-extract-takeaways' (when `org-capture-ai-extract-takeaways'
+   is non-nil): extracts 3-5 key insights, stored in the TAKEAWAYS
+   property as pipe-separated sentences.
 On completion, sets STATUS to \"completed\" and records PROCESSED_AT,
 then removes MARKER from `org-capture-ai--processing-markers' and
 invalidates it."
@@ -950,32 +1051,30 @@ invalidates it."
           ;; Second: Extract tags
           (org-capture-ai-llm-extract-tags text
             (lambda (tags)
-              (if tags
-                  (save-excursion
-                    (org-with-point-at marker
-                      (org-back-to-heading t)
+              (when tags
+                (save-excursion
+                  (org-with-point-at marker
+                    (org-back-to-heading t)
+                    ;; Save as SUBJECT (Dublin Core) - sanitized
+                    (org-entry-put nil "SUBJECT"
+                                   (org-capture-ai--sanitize-property-value
+                                    (mapconcat #'identity tags ", ")))
+                    ;; Also add as org tags (removing duplicates)
+                    (org-set-tags (delete-dups (append (org-get-tags) tags))))))
 
-                      ;; Save as SUBJECT (Dublin Core) - sanitized
-                      (org-entry-put nil "SUBJECT"
-                                     (org-capture-ai--sanitize-property-value
-                                      (mapconcat #'identity tags ", ")))
-
-                      ;; Also add as org tags (removing duplicates)
-                      (org-set-tags (delete-dups (append (org-get-tags) tags)))
-
-                      ;; Mark complete
-                      (org-capture-ai--set-status marker "completed")
-                      (org-entry-put nil "PROCESSED_AT"
-                                     (format-time-string "[%Y-%m-%d %a %H:%M]"))
-
-                      (message "org-capture-ai: Processing complete")))
-                (org-capture-ai--set-status marker "error" "Tag extraction failed"))
-
-              ;; Clean up marker and remove from processing list
-              (setq org-capture-ai--processing-markers
-                    (delq (marker-position marker) org-capture-ai--processing-markers))
-              (org-capture-ai--log "Removed marker %d from processing list" (marker-position marker))
-              (set-marker marker nil)))))))))
+              ;; Third: Extract takeaways (if enabled and tags succeeded)
+              (if (and tags org-capture-ai-extract-takeaways)
+                  (org-capture-ai-llm-extract-takeaways text
+                    (lambda (takeaways)
+                      (when takeaways
+                        (save-excursion
+                          (org-with-point-at marker
+                            (org-back-to-heading t)
+                            (org-entry-put nil "TAKEAWAYS"
+                                           (org-capture-ai--sanitize-property-value
+                                            (mapconcat #'identity takeaways " | "))))))
+                      (org-capture-ai--finalize-entry marker tags)))
+                (org-capture-ai--finalize-entry marker tags)))))))))
 
 ;;; Batch Processing
 

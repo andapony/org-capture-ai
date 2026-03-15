@@ -111,7 +111,8 @@ An orphaned drawer is a :PROPERTIES: block without a heading above it."
 
 (defvar org-capture-ai-test--mock-llm-responses
   '((:summary . "TITLE: Test Title\nSUMMARY: This is a test summary. It has multiple sentences. Testing works.")
-    (:tags . "article, test, emacs"))
+    (:tags . "article, test, emacs")
+    (:takeaways . "1. Testing is important for reliability.\n2. Emacs is highly extensible.\n3. Async code requires careful design."))
   "Default mock LLM responses.")
 
 (defun org-capture-ai-test--mock-gptel-request (text &rest args)
@@ -127,6 +128,8 @@ Calls callback synchronously with response based on system message."
                       (cdr (assq :summary org-capture-ai-test--mock-llm-responses)))
                      ((string-match "tags" system-msg)
                       (cdr (assq :tags org-capture-ai-test--mock-llm-responses)))
+                     ((string-match "takeaway" system-msg)
+                      (cdr (assq :takeaways org-capture-ai-test--mock-llm-responses)))
                      (t "mock response"))))
       ;; Call callback synchronously for easier testing
       (funcall callback response nil))))
@@ -202,6 +205,19 @@ Returns a marker pointing to the entry."
   (insert ":STATUS: processing\n")
   (dolist (prop extra-props)
     (insert (format ":%s: %s\n" (car prop) (cdr prop))))
+  (insert ":END:\n\n")
+  (org-back-to-heading t)
+  (point-marker))
+
+(defun org-capture-ai-test--create-completed-entry (url title)
+  "Create a completed entry with URL and TITLE in the test buffer.
+Returns a marker pointing to the entry.  Used to set up duplicate-detection tests."
+  (goto-char (point-max))
+  (insert (format "** %s\n" title))
+  (insert ":PROPERTIES:\n")
+  (insert ":URL: " url "\n")
+  (insert ":CAPTURED: [2025-10-27 Mon 14:00]\n")
+  (insert ":STATUS: completed\n")
   (insert ":END:\n\n")
   (org-back-to-heading t)
   (point-marker))

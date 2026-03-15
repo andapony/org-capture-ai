@@ -100,8 +100,8 @@ File: org-capture-ai.el lines 932-933"
          ;; Should only have ONE properties drawer despite multiple setup calls
          (should (= 1 (org-capture-ai-test--count-properties-drawers)))
 
-         ;; Should only call LLM twice (summary + tags), not 6 times
-         (should (= 2 org-capture-ai-test--mock-llm-call-count)))))))
+         ;; Should only call LLM three times (summary + tags + takeaways), not 9 times
+         (should (= 3 org-capture-ai-test--mock-llm-call-count)))))))
 
 (ert-deftest org-capture-ai-regression-20251027-heading-replacement ()
   "Regression: replace-match destroys heading structure.
@@ -179,6 +179,132 @@ fixed the multi-line description bug."
   ;; Test trimming
   (should (equal "trimmed"
                  (org-capture-ai--sanitize-property-value "  trimmed  "))))
+
+(ert-deftest org-capture-ai-regression-20260315-duplicate-skip ()
+  "Regression: Duplicate URL with skip action sets STATUS=duplicate.
+
+Bug: Without duplicate detection, capturing the same URL twice creates
+redundant entries.
+
+Fix: org-capture-ai--find-duplicate detects matching completed entries;
+with duplicate-action=skip, processing halts and STATUS=duplicate is set.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-duplicate-action 'skip)
+         (org-capture-ai-default-file org-capture-ai-test--temp-file)
+         (test-url "https://example.com/test-article"))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+
+       ;; Create the existing completed entry for the same URL
+       (org-capture-ai-test--create-completed-entry test-url "Existing Article")
+
+       ;; Now capture the same URL again
+       (let* ((marker (org-capture-ai-test--create-processing-entry test-url))
+              (entry-pos (marker-position marker)))
+
+         (org-capture-ai--async-process marker)
+
+         ;; Wait briefly for sync processing
+         (sit-for 0.2)
+
+         ;; Navigate to the new entry
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+
+         ;; Should be marked as duplicate, not completed
+         (should (equal "duplicate" (org-entry-get nil "STATUS"))))))))
+
+(ert-deftest org-capture-ai-regression-20260315-duplicate-warn ()
+  "Regression: Duplicate URL with warn action continues processing.
+
+Bug: The warn action should allow processing to proceed normally so the
+user sees the warning but still gets a processed entry.
+
+Fix: With duplicate-action=warn, only a message is emitted; processing
+continues and STATUS reaches completed.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-duplicate-action 'warn)
+         (org-capture-ai-default-file org-capture-ai-test--temp-file)
+         (test-url "https://example.com/test-article"))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+
+       ;; Create the existing completed entry for the same URL
+       (org-capture-ai-test--create-completed-entry test-url "Existing Article")
+
+       ;; Capture the same URL again
+       (let* ((marker (org-capture-ai-test--create-processing-entry test-url))
+              (entry-pos (marker-position marker)))
+
+         (org-capture-ai--async-process marker)
+         (org-capture-ai-test--wait-for-processing marker)
+
+         ;; Navigate back
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+
+         ;; Processing should complete normally despite duplicate
+         (should (equal "completed" (org-entry-get nil "STATUS"))))))))
+
+(ert-deftest org-capture-ai-regression-20260315-takeaways-extracted ()
+  "Regression: TAKEAWAYS property is set when extraction is enabled.
+
+Bug: Without takeaways feature, there is no way to get a quick overview
+of an article's key insights without reading the full summary.
+
+Fix: org-capture-ai-llm-extract-takeaways runs as a third LLM step after
+tags, storing results in TAKEAWAYS as pipe-separated sentences.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-extract-takeaways t))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+       (let* ((marker (org-capture-ai-test--create-processing-entry
+                       "https://example.com/article"))
+              (entry-pos (marker-position marker)))
+
+         (org-capture-ai--async-process marker)
+         (org-capture-ai-test--wait-for-processing marker)
+
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+
+         (should (equal "completed" (org-entry-get nil "STATUS")))
+         (let ((takeaways (org-entry-get nil "TAKEAWAYS")))
+           (should takeaways)
+           ;; Should contain at least one pipe-separated takeaway
+           (should (string-match-p "\\." takeaways))))))))
+
+(ert-deftest org-capture-ai-regression-20260315-takeaways-disabled ()
+  "Regression: No TAKEAWAYS property when extraction is disabled.
+
+Bug: Users who want to reduce API costs should be able to skip takeaways.
+
+Fix: When org-capture-ai-extract-takeaways is nil, the third LLM call is
+skipped and TAKEAWAYS is not set.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-extract-takeaways nil))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+       (let* ((marker (org-capture-ai-test--create-processing-entry
+                       "https://example.com/article"))
+              (entry-pos (marker-position marker)))
+
+         (org-capture-ai--async-process marker)
+         (org-capture-ai-test--wait-for-processing marker)
+
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+
+         (should (equal "completed" (org-entry-get nil "STATUS")))
+         (should (null (org-entry-get nil "TAKEAWAYS"))))))))
 
 (provide 'org-capture-ai-regression-test)
 ;;; org-capture-ai-regression-test.el ends here
