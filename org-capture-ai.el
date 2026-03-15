@@ -356,7 +356,7 @@ Cleans up the temporary output file and stderr buffer in all code paths."
            (funcall error-cb
                     (if (string-empty-p err-msg)
                         (format "curl failed: %s" (string-trim event))
-                      (format "curl error: %s" err-msg))))))))
+                      (format "curl error: %s" err-msg))))))))))
 
 (defun org-capture-ai-fetch-url-builtin (url success-cb error-cb)
   "Fetch URL asynchronously using Emacs built-in `url-retrieve'.
