@@ -182,9 +182,6 @@ If nil, entries will be marked as queued for later batch processing."
 (defvar org-capture-ai--batch-timer nil
   "Timer for batch processing queued entries.")
 
-(defvar org-capture-ai--cache (make-hash-table :test 'equal)
-  "Cache for LLM results keyed by content hash.")
-
 ;;; Logging
 
 (defun org-capture-ai--log (format-string &rest args)
@@ -585,33 +582,6 @@ No explanation, no extra formatting."
                                           (replace-regexp-in-string "-" "_" (string-trim tag)))
                                         tags)))
           (funcall callback nil))))))
-
-(defun org-capture-ai-llm-retry (text system-msg marker callback max-attempts)
-  "Retry LLM request up to MAX-ATTEMPTS times.
-TEXT is the prompt, SYSTEM-MSG is the system message.
-Update status at MARKER and call CALLBACK on success."
-  (let ((attempts 0))
-    (cl-labels ((try-request ()
-                  (setq attempts (1+ attempts))
-                  (org-capture-ai--log "LLM attempt %d/%d" attempts max-attempts)
-                  (gptel-request text
-                    :system system-msg
-                    :stream nil
-                    :callback
-                    (lambda (response info)
-                      (if response
-                          (funcall callback response)
-                        (if (< attempts max-attempts)
-                            (progn
-                              (org-capture-ai--log "Retry %d/%d after error" attempts max-attempts)
-                              (run-with-timer 2 nil #'try-request))
-                          (progn
-                            (org-capture-ai--set-status marker "error"
-                              (format "Failed after %d attempts: %s"
-                                      max-attempts
-                                      (plist-get info :status)))
-                            (funcall callback nil))))))))
-      (try-request))))
 
 ;;; Capture Integration
 
