@@ -61,7 +61,7 @@ dispatcher."
 
 (defcustom org-capture-ai-summary-sentences 3
   "Number of sentences for AI-generated summaries.
-Only used when `org-capture-ai-summary-style' is 'sentences."
+Only used when `org-capture-ai-summary-style' is `sentences'."
   :type 'integer
   :group 'org-capture-ai)
 
@@ -79,14 +79,14 @@ Only used when `org-capture-ai-summary-style' is 'sentences."
 
 (defcustom org-capture-ai-summary-overview-sentences 3
   "Number of sentences in the overview paragraph.
-Used when `org-capture-ai-summary-style' is 'paragraphs."
+Used when `org-capture-ai-summary-style' is `paragraphs'."
   :type 'integer
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-summary-topic-paragraphs 'auto
   "Number of topic paragraphs to generate.
-Used when `org-capture-ai-summary-style' is 'paragraphs.
-- 'auto: Let the LLM decide based on article content
+Used when `org-capture-ai-summary-style' is `paragraphs'.
+- `auto': Let the LLM decide based on article content
 - Integer: Request specific number of topic paragraphs"
   :type '(choice (const :tag "Auto (LLM decides)" auto)
                  (integer :tag "Fixed number"))
@@ -94,7 +94,7 @@ Used when `org-capture-ai-summary-style' is 'paragraphs.
 
 (defcustom org-capture-ai-summary-topic-max-sentences 5
   "Maximum sentences per topic paragraph.
-Used when `org-capture-ai-summary-style' is 'paragraphs."
+Used when `org-capture-ai-summary-style' is `paragraphs'."
   :type 'integer
   :group 'org-capture-ai)
 
@@ -356,7 +356,7 @@ Cleans up the temporary output file and stderr buffer in all code paths."
            (funcall error-cb
                     (if (string-empty-p err-msg)
                         (format "curl failed: %s" (string-trim event))
-                      (format "curl error: %s" err-msg)))))))))
+                      (format "curl error: %s" err-msg))))))))
 
 (defun org-capture-ai-fetch-url-builtin (url success-cb error-cb)
   "Fetch URL asynchronously using Emacs built-in `url-retrieve'.
