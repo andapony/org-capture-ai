@@ -1,4 +1,4 @@
-.PHONY: test test-regression test-error test-integration clean deps help
+.PHONY: test test-regression test-error test-integration test-fetch clean deps help
 
 EMACS ?= emacs
 GPTEL_DIR = test-deps/gptel
@@ -10,6 +10,7 @@ help:
 	@echo "  make test-regression  Run regression tests only"
 	@echo "  make test-error       Run error condition tests only"
 	@echo "  make test-integration Run integration tests only"
+	@echo "  make test-fetch       Run real HTTP fetch tests (requires Python 3)"
 	@echo "  make deps             Install gptel test dependency"
 	@echo "  make clean            Remove test result logs"
 	@echo "  make check            Byte-compile org-capture-ai.el (warnings = errors)"
@@ -27,6 +28,9 @@ test-error:
 
 test-integration:
 	./run-tests.sh integration
+
+test-fetch:
+	./run-tests.sh fetch
 
 check:
 	@output=$$($(EMACS) --batch --no-site-file \

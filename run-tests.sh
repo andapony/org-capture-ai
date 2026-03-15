@@ -72,7 +72,8 @@ case "$TEST_SUITE" in
 
         for test_file in org-capture-ai-regression-test.el \
                         org-capture-ai-error-test.el \
-                        org-capture-ai-integration-test-v2.el; do
+                        org-capture-ai-integration-test-v2.el \
+                        org-capture-ai-fetch-test.el; do
             TOTAL_TESTS=$((TOTAL_TESTS + 1))
             if run_test_file "$test_file"; then
                 PASSED_TESTS=$((PASSED_TESTS + 1))
@@ -100,6 +101,12 @@ case "$TEST_SUITE" in
         run_test_file "org-capture-ai-integration-test-v2.el"
         ;;
 
+    fetch)
+        echo "Running fetch tests only..."
+        echo
+        run_test_file "org-capture-ai-fetch-test.el"
+        ;;
+
     legacy)
         echo "Running legacy integration tests..."
         echo
@@ -116,6 +123,7 @@ case "$TEST_SUITE" in
         echo "  regression  - Run regression tests for specific bugs"
         echo "  error       - Run error condition tests"
         echo "  integration - Run integration tests (v2)"
+        echo "  fetch       - Run real HTTP fetch tests (requires Python 3)"
         echo "  legacy      - Run original integration tests"
         exit 1
         ;;
