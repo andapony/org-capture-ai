@@ -446,33 +446,47 @@ Returns a plist with Dublin Core elements."
 
 ;;; LLM Integration
 
-(defun org-capture-ai-llm-request (prompt system-msg callback)
+(defun org-capture-ai-llm-request (prompt system-msg callback &optional attempt)
   "Make LLM request with PROMPT and SYSTEM-MSG.
 Call CALLBACK with (response info) on completion.
-Response is nil on error."
-  (org-capture-ai--log "LLM request: %s (prompt length: %d chars)"
-                       (substring system-msg 0 (min 50 (length system-msg)))
-                       (length prompt))
-  (condition-case err
-      ;; Create a temporary buffer with UTF-8 encoding for gptel
-      (with-temp-buffer
-        (set-buffer-file-coding-system 'utf-8)
-        (insert prompt)
-        (gptel-request (buffer-substring-no-properties (point-min) (point-max))
-          :system system-msg
-          :stream nil
-          :callback
-          (lambda (response info)
-            (org-capture-ai--log "LLM callback fired! response=%s info=%s"
-                                 (if response "present" "nil")
-                                 info)
-            (if response
-                (org-capture-ai--log "LLM response received (%d chars)" (length response))
-              (org-capture-ai--log "LLM request failed: %s" (plist-get info :status)))
-            (funcall callback response info))))
-    (error
-     (org-capture-ai--log "Error in gptel-request: %s" err)
-     (funcall callback nil (list :status (format "error: %s" err))))))
+Response is nil on error after all retries exhausted.
+ATTEMPT tracks the current attempt number (internal, starts at 1)."
+  (let ((attempt (or attempt 1)))
+    (org-capture-ai--log "LLM request attempt %d/%d: %s (prompt length: %d chars)"
+                         attempt org-capture-ai-max-retries
+                         (substring system-msg 0 (min 50 (length system-msg)))
+                         (length prompt))
+    (condition-case err
+        (with-temp-buffer
+          (set-buffer-file-coding-system 'utf-8)
+          (insert prompt)
+          (gptel-request (buffer-substring-no-properties (point-min) (point-max))
+            :system system-msg
+            :stream nil
+            :callback
+            (lambda (response info)
+              (org-capture-ai--log "LLM callback fired! response=%s info=%s"
+                                   (if response "present" "nil")
+                                   info)
+              (if response
+                  (progn
+                    (org-capture-ai--log "LLM response received (%d chars)" (length response))
+                    (funcall callback response info))
+                (if (< attempt org-capture-ai-max-retries)
+                    (progn
+                      (org-capture-ai--log "LLM retry %d/%d after error: %s"
+                                           attempt org-capture-ai-max-retries
+                                           (plist-get info :status))
+                      (run-with-timer (* 2 attempt) nil
+                                      #'org-capture-ai-llm-request
+                                      prompt system-msg callback (1+ attempt)))
+                  (progn
+                    (org-capture-ai--log "LLM request failed after %d attempts: %s"
+                                         attempt (plist-get info :status))
+                    (funcall callback nil info)))))))
+      (error
+       (org-capture-ai--log "Error in gptel-request: %s" err)
+       (funcall callback nil (list :status (format "error: %s" err)))))))
 
 (defun org-capture-ai-llm-summarize (text callback &optional sentences)
   "Summarize TEXT using LLM.
