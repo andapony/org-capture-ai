@@ -489,7 +489,8 @@ Returns a plist with Dublin Core elements."
   "Make LLM request with PROMPT and SYSTEM-MSG.
 Call CALLBACK with (response info) on completion.
 Response is nil on error after all retries exhausted.
-ATTEMPT tracks the current attempt number (internal, starts at 1)."
+Synchronous errors (e.g. gptel not configured) are passed through immediately
+without retrying. ATTEMPT tracks the current attempt number (internal, starts at 1)."
   (let ((attempt (or attempt 1)))
     (org-capture-ai--log "LLM request attempt %d/%d: %s (prompt length: %d chars)"
                          attempt org-capture-ai-max-retries
@@ -877,6 +878,11 @@ URL is the source URL. Update entry at MARKER with results."
 Respects `org-capture-ai-batch-concurrency' to avoid overwhelming the LLM API.
 Files searched are `org-capture-ai-files', defaulting to `org-capture-ai-default-file'."
   (interactive)
+  ;; Guard against concurrent invocations (e.g. idle timer firing during a running batch)
+  (when (> org-capture-ai--active-fetch-count 0)
+    (message "org-capture-ai: Batch already running (%d active), skipping"
+             org-capture-ai--active-fetch-count)
+    (cl-return-from org-capture-ai-process-queued))
   (let ((files (or org-capture-ai-files (list org-capture-ai-default-file)))
         (entries nil))
     ;; Collect all queued entries across all configured files
@@ -895,10 +901,9 @@ Files searched are `org-capture-ai-files', defaulting to `org-capture-ai-default
       (message "org-capture-ai: Starting batch processing of %d entries" (length entries))
       (setq org-capture-ai--pending-batch entries)
       (setq org-capture-ai--active-fetch-count 0)
-      ;; Seed up to concurrency limit
-      (let ((initial (min org-capture-ai-batch-concurrency (length entries))))
-        (dotimes (_ initial)
-          (org-capture-ai--batch-dispatch-next))))))
+      ;; Seed the queue — dispatch-next's guard handles the concurrency limit
+      (dotimes (_ org-capture-ai-batch-concurrency)
+        (org-capture-ai--batch-dispatch-next)))))
 
 (defun org-capture-ai--batch-dispatch-next ()
   "Start processing the next pending batch entry if below concurrency limit.
