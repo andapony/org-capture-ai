@@ -485,8 +485,8 @@ ATTEMPT tracks the current attempt number (internal, starts at 1)."
                     (funcall callback response info))
                 (if (< attempt org-capture-ai-max-retries)
                     (progn
-                      (org-capture-ai--log "LLM retry %d/%d after error: %s"
-                                           attempt org-capture-ai-max-retries
+                      (org-capture-ai--log "LLM attempt %d failed, scheduling retry %d/%d: %s"
+                                           attempt (1+ attempt) org-capture-ai-max-retries
                                            (plist-get info :status))
                       (run-with-timer (* 2 attempt) nil
                                       #'org-capture-ai-llm-request
