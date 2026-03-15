@@ -19,8 +19,9 @@
    (setq org-capture-ai-test--mock-fetch-error-message "404 Not Found")
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/404")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/404"))
+            (entry-pos (marker-position marker)))
 
        ;; Process the entry
        (org-capture-ai--async-process marker)
@@ -31,17 +32,18 @@
          ;; Should be in fetch-error state
          (should (equal final-status "fetch-error"))
 
-         ;; Should have error message
-         (org-with-point-at marker
+         (save-excursion
+           (goto-char entry-pos)
+           (org-back-to-heading t)
+           ;; Should have error message
            (let ((error-msg (org-entry-get nil "ERROR")))
              (should error-msg)
-             (should (string-match-p "404 Not Found" error-msg))))
+             (should (string-match-p "404 Not Found" error-msg)))
+           ;; Should still have valid properties drawer
+           (org-capture-ai-test--assert-single-properties-drawer))
 
          ;; Should NOT have called LLM
-         (should (= 0 org-capture-ai-test--mock-llm-call-count))
-
-         ;; Should still have valid properties drawer
-         (org-capture-ai-test--assert-single-properties-drawer))))))
+         (should (= 0 org-capture-ai-test--mock-llm-call-count)))))))
 
 (ert-deftest org-capture-ai-error-test-empty-content ()
   "Test handling of page with no readable content."
@@ -51,8 +53,9 @@
          (org-capture-ai-test--load-fixture "html" "empty-body.html"))
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/empty")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/empty"))
+            (entry-pos (marker-position marker)))
 
        (org-capture-ai--async-process marker)
 
@@ -61,8 +64,10 @@
          ;; Should be in error state
          (should (equal final-status "error"))
 
-         ;; Should have descriptive error
-         (org-with-point-at marker
+         (save-excursion
+           (goto-char entry-pos)
+           (org-back-to-heading t)
+           ;; Should have descriptive error
            (let ((error-msg (org-entry-get nil "ERROR")))
              (should (string-match-p "no readable text" error-msg))))
 
@@ -79,8 +84,9 @@
          (org-capture-ai-test--load-fixture "html" "only-scripts.html"))
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/js-only")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/js-only"))
+            (entry-pos (marker-position marker)))
 
        (org-capture-ai--async-process marker)
 
@@ -89,8 +95,10 @@
          ;; Should fail due to content too short
          (should (equal final-status "error"))
 
-         ;; Should have extracted metadata even though content failed
-         (org-with-point-at marker
+         (save-excursion
+           (goto-char entry-pos)
+           (org-back-to-heading t)
+           ;; Should have extracted metadata even though content failed
            (should (org-entry-get nil "TITLE")))
 
          ;; Single properties drawer
@@ -131,22 +139,24 @@
          (org-capture-ai-test--load-fixture "html" "long-description.html"))
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/long")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/long"))
+            (entry-pos (marker-position marker)))
 
        (org-capture-ai--async-process marker)
        (org-capture-ai-test--wait-for-processing marker)
 
-       ;; Verify DESCRIPTION was truncated to max 500 chars
-       (org-with-point-at marker
+       (save-excursion
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+         ;; Verify DESCRIPTION was truncated to max 500 chars
          (let ((description (org-entry-get nil "DESCRIPTION")))
            (should (<= (length description) 500))
            ;; Should end with "..." if truncated
            (when (>= (length description) 500)
-             (should (string-suffix-p "..." description)))))
-
-       ;; Should still complete successfully
-       (should (equal "completed" (org-entry-get nil "STATUS" marker)))
+             (should (string-suffix-p "..." description))))
+         ;; Should still complete successfully
+         (should (equal "completed" (org-entry-get nil "STATUS"))))
 
        ;; Properties drawer should be intact
        (should (= 1 (org-capture-ai-test--count-properties-drawers)))))))
@@ -158,29 +168,26 @@
          (org-capture-ai-test--load-fixture "html" "special-chars.html"))
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/special")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/special"))
+            (entry-pos (marker-position marker)))
 
        (org-capture-ai--async-process marker)
        (org-capture-ai-test--wait-for-processing marker)
 
-       ;; Should handle special chars without breaking
-       (org-with-point-at marker
-         ;; Title should contain quotes
-         (let ((title (org-entry-get nil "TITLE")))
-           (should (string-match-p "Quotes" title)))
-
-         ;; CREATOR should handle non-ASCII
+       (save-excursion
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+         ;; Should handle special chars without breaking
+         ;; (TITLE and DESCRIPTION are overwritten by LLM; check HTML-only properties)
          (let ((creator (org-entry-get nil "CREATOR")))
            (should creator)
-           (should (string-match-p "O'Brien" creator))))
-
-       ;; Properties drawer should be well-formed
-       (org-capture-ai-test--assert-single-properties-drawer)
-       (org-capture-ai-test--assert-properties-drawer-structure)
-
-       ;; Should complete successfully
-       (should (equal "completed" (org-entry-get nil "STATUS" marker)))))))
+           (should (string-match-p "O'Brien" creator)))
+         ;; Properties drawer should be well-formed
+         (org-capture-ai-test--assert-single-properties-drawer)
+         (org-capture-ai-test--assert-properties-drawer-structure)
+         ;; Should complete successfully
+         (should (equal "completed" (org-entry-get nil "STATUS"))))))))
 
 (ert-deftest org-capture-ai-error-test-missing-url-property ()
   "Test behavior when entry has no URL property."
@@ -210,42 +217,38 @@
   "Test multiple entries being processed concurrently."
   (org-capture-ai-test--with-mocked-env
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     ;; Create three entries
-     (let ((marker1 (org-capture-ai-test--create-processing-entry
-                     "https://example.com/test1"))
-           (marker2 (org-capture-ai-test--create-processing-entry
-                     "https://example.com/test2"))
-           (marker3 (org-capture-ai-test--create-processing-entry
-                     "https://example.com/test3")))
+     ;; Create three entries, saving positions before any processing
+     (let* ((marker1 (org-capture-ai-test--create-processing-entry
+                      "https://example.com/test1"))
+            (marker2 (org-capture-ai-test--create-processing-entry
+                      "https://example.com/test2"))
+            (marker3 (org-capture-ai-test--create-processing-entry
+                      "https://example.com/test3"))
+            (pos1 (marker-position marker1))
+            (pos2 (marker-position marker2))
+            (pos3 (marker-position marker3)))
 
        ;; Start all three processing
        (org-capture-ai--async-process marker1)
        (org-capture-ai--async-process marker2)
        (org-capture-ai--async-process marker3)
 
-       ;; Wait for all to complete
-       (org-capture-ai-test--wait-for-processing marker1)
-       (org-capture-ai-test--wait-for-processing marker2)
-       (org-capture-ai-test--wait-for-processing marker3)
+       ;; Wait for all deferred callbacks to fire
+       (sit-for 0.5)
 
        ;; All should complete successfully
-       (should (equal "completed" (org-entry-get nil "STATUS" marker1)))
-       (should (equal "completed" (org-entry-get nil "STATUS" marker2)))
-       (should (equal "completed" (org-entry-get nil "STATUS" marker3)))
+       (dolist (pos (list pos1 pos2 pos3))
+         (save-excursion
+           (goto-char pos)
+           (org-back-to-heading t)
+           (should (equal "completed" (org-entry-get nil "STATUS")))
+           (org-capture-ai-test--assert-single-properties-drawer)))
 
        ;; Should have exactly 3 properties drawers (one per entry)
        (should (= 3 (org-capture-ai-test--count-properties-drawers)))
 
-       ;; Each should be well-formed
-       (org-with-point-at marker1
-         (org-capture-ai-test--assert-single-properties-drawer))
-       (org-with-point-at marker2
-         (org-capture-ai-test--assert-single-properties-drawer))
-       (org-with-point-at marker3
-         (org-capture-ai-test--assert-single-properties-drawer))
-
-       ;; LLM should have been called 6 times (2 per entry)
-       (should (= 6 org-capture-ai-test--mock-llm-call-count))))))
+       ;; LLM should have been called 9 times (3 per entry: summary + tags + takeaways)
+       (should (= 9 org-capture-ai-test--mock-llm-call-count))))))
 
 (provide 'org-capture-ai-error-test)
 ;;; org-capture-ai-error-test.el ends here

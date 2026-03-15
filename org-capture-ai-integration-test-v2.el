@@ -19,8 +19,9 @@
          (org-capture-ai-test--load-fixture "html" "normal-article.html"))
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/test-article")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/test-article"))
+            (entry-pos (marker-position marker)))
 
        ;; Process the entry
        (org-capture-ai--async-process marker)
@@ -36,14 +37,15 @@
          ;; Assertions using helpers
          (should (equal final-status "completed"))
          (should (= 1 (org-capture-ai-test--count-properties-drawers)))
-         (should (= 2 org-capture-ai-test--mock-llm-call-count))
+         (should (= 3 org-capture-ai-test--mock-llm-call-count))
 
          ;; Verify properties
-         (org-with-point-at marker
+         (save-excursion
+           (goto-char entry-pos)
+           (org-back-to-heading t)
            (org-capture-ai-test--assert-properties
             '(("STATUS" . "completed")
               ("TITLE" . "Test Title")))
-
            ;; Verify drawer structure
            (org-capture-ai-test--assert-single-properties-drawer)
            (org-capture-ai-test--assert-properties-drawer-structure))
@@ -58,15 +60,18 @@
          (org-capture-ai-test--load-fixture "html" "normal-article.html"))
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/fixture-test")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/fixture-test"))
+            (entry-pos (marker-position marker)))
 
        (org-capture-ai--async-process marker)
        (org-capture-ai-test--wait-for-processing marker)
 
-       ;; Should extract metadata from fixture
-       (org-with-point-at marker
-         (should (string= "Understanding Emacs Buffers" (org-entry-get nil "TITLE")))
+       ;; Should extract HTML metadata from fixture (CREATOR and PUBLISHER
+       ;; come from HTML; TITLE is overwritten by LLM mock)
+       (save-excursion
+         (goto-char entry-pos)
+         (org-back-to-heading t)
          (should (string= "Jane Developer" (org-entry-get nil "CREATOR")))
          (should (string= "Emacs Weekly" (org-entry-get nil "PUBLISHER"))))
 
@@ -80,8 +85,9 @@
          (org-capture-ai-test--load-fixture "html" "multiline-description.html"))
 
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/multiline")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/multiline"))
+            (entry-pos (marker-position marker)))
 
        (org-capture-ai--async-process marker)
        (let ((final-status (org-capture-ai-test--wait-for-processing marker)))
@@ -97,14 +103,14 @@
          ;; Should complete successfully
          (should (equal final-status "completed"))
 
-         ;; Properties should be single-line
-         (org-with-point-at marker
+         (save-excursion
+           (goto-char entry-pos)
+           (org-back-to-heading t)
+           ;; Properties should be single-line
            (let ((description (org-entry-get nil "DESCRIPTION")))
              (when description  ; May be overwritten by LLM
-               (should-not (string-match-p "\n" description)))))
-
-         ;; Drawer structure should be valid
-         (org-with-point-at marker
+               (should-not (string-match-p "\n" description))))
+           ;; Drawer structure should be valid
            (org-capture-ai-test--assert-properties-drawer-structure))
 
          ;; No orphaned drawers
@@ -132,14 +138,15 @@
 
          ;; Should only process once
          (should (= 1 (org-capture-ai-test--count-properties-drawers)))
-         (should (= 2 org-capture-ai-test--mock-llm-call-count)))))))
+         (should (= 3 org-capture-ai-test--mock-llm-call-count)))))))
 
 (ert-deftest org-capture-ai-integration-test-v2-performance ()
   "Benchmark processing time for a single entry."
   (org-capture-ai-test--with-mocked-env
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/perf-test")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/perf-test"))
+            (entry-pos (marker-position marker)))
 
        (let ((elapsed (org-capture-ai-test--measure-time
                        (org-capture-ai--async-process marker)
@@ -152,7 +159,10 @@
          (should (< elapsed 1.0))
 
          ;; Should complete successfully
-         (should (equal "completed" (org-entry-get nil "STATUS" marker))))))))
+         (save-excursion
+           (goto-char entry-pos)
+           (org-back-to-heading t)
+           (should (equal "completed" (org-entry-get nil "STATUS")))))))))
 
 (defun org-capture-ai-integration-test-v2-run-all ()
   "Run all v2 integration tests."

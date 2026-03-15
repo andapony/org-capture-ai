@@ -160,11 +160,13 @@ Calls callback synchronously with response based on system message."
 
 (defun org-capture-ai-test--mock-fetch-url (url success-cb error-cb)
   "Mock URL fetch for testing.
-Calls SUCCESS-CB with HTML or ERROR-CB based on test configuration."
+Schedules SUCCESS-CB or ERROR-CB via a zero-delay timer so the caller
+returns before the callback fires.  This preserves marker validity at
+the time `org-capture-ai-test--wait-for-processing' first runs."
   (message "[MOCK] fetch-url called for: %s" url)
   (if org-capture-ai-test--mock-fetch-should-fail
-      (funcall error-cb org-capture-ai-test--mock-fetch-error-message)
-    (funcall success-cb org-capture-ai-test--mock-html-response)))
+      (run-with-timer 0 nil error-cb org-capture-ai-test--mock-fetch-error-message)
+    (run-with-timer 0 nil success-cb org-capture-ai-test--mock-html-response)))
 
 ;;; Test Environment Macro
 
@@ -225,20 +227,31 @@ Returns a marker pointing to the entry.  Used to set up duplicate-detection test
 (defun org-capture-ai-test--wait-for-processing (marker &optional max-wait)
   "Wait for entry at MARKER to finish processing.
 MAX-WAIT is max iterations (default 100, ~10 seconds).
-Returns final STATUS value or nil if marker was invalidated."
-  (let ((max-wait (or max-wait 100)))
-    ;; Check if marker is still valid
-    (when (and marker (marker-buffer marker))
-      (org-with-point-at marker
-        (while (and (> max-wait 0)
-                    (marker-buffer marker)  ; Check marker still valid
-                    (string= (org-entry-get nil "STATUS") "processing"))
-          (sit-for 0.1)
-          (setq max-wait (1- max-wait))))
-      ;; Return final status (if marker still valid)
-      (when (marker-buffer marker)
-        (org-with-point-at marker
-          (org-entry-get nil "STATUS"))))))
+Saves buffer and position at call time so status can be read even after
+the marker is invalidated (which happens at the end of processing).
+Returns final STATUS value, or nil on timeout or if buffer was killed."
+  (let ((max-wait (or max-wait 100))
+        (buf (and marker (marker-buffer marker)))
+        (pos (and marker (marker-position marker))))
+    (when (and buf pos)
+      ;; Poll while in a transient state, using saved buf/pos not marker
+      (while (and (> max-wait 0)
+                  (buffer-live-p buf)
+                  (with-current-buffer buf
+                    (save-excursion
+                      (goto-char pos)
+                      (org-back-to-heading t)
+                      (member (org-entry-get nil "STATUS")
+                              '("processing" "fetching")))))
+        (sit-for 0.1)
+        (setq max-wait (1- max-wait)))
+      ;; Return final status via saved position (marker may be nil by now)
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (save-excursion
+            (goto-char pos)
+            (org-back-to-heading t)
+            (org-entry-get nil "STATUS")))))))
 
 ;;; Snapshot Testing
 
