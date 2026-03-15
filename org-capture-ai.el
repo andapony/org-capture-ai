@@ -249,7 +249,7 @@ Uses make-process for stderr capture. Enforces 30-second timeout."
                     "-A" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     url)
      :sentinel
-     (lambda (proc event)
+     (lambda (_proc event)
        (cond
         ((string-match "^finished" event)
          (condition-case err
