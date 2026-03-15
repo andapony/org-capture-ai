@@ -200,6 +200,13 @@ most LLM context limits while covering the vast majority of articles."
   :type 'integer
   :group 'org-capture-ai)
 
+(defcustom org-capture-ai-reading-wpm 238
+  "Words per minute used to estimate reading time for captured articles.
+The default of 238 is the average adult silent reading rate.
+Used by `org-capture-ai--estimate-reading-time' to compute READING_TIME."
+  :type 'integer
+  :group 'org-capture-ai)
+
 (defcustom org-capture-ai-files nil
   "List of org files to search for queued entries during batch processing.
 If nil, defaults to a list containing `org-capture-ai-default-file'.
@@ -895,6 +902,13 @@ Returns nil when VALUE is nil."
         (setq sanitized (concat (substring sanitized 0 497) "...")))
       sanitized)))
 
+(defun org-capture-ai--estimate-reading-time (text)
+  "Return a reading time string for TEXT based on `org-capture-ai-reading-wpm'.
+Returns a string like \"4 min\".  The minimum is \"1 min\"."
+  (let* ((word-count (length (split-string text nil t)))
+         (minutes (max 1 (round (/ (float word-count) org-capture-ai-reading-wpm)))))
+    (format "%d min" minutes)))
+
 (defun org-capture-ai--process-html (html-content url marker)
   "Process HTML-CONTENT fetched from URL and drive LLM analysis.
 Extracts Dublin Core metadata and readable body text from HTML-CONTENT,
@@ -919,6 +933,10 @@ characters before being sent to the LLM."
       (org-with-point-at marker
         (org-back-to-heading t)
         (org-capture-ai--set-status marker "processing")
+
+        ;; Set reading time estimate
+        (org-entry-put nil "READING_TIME"
+                       (org-capture-ai--estimate-reading-time clean-text))
 
         ;; Set Dublin Core metadata properties (sanitized for single-line)
         (org-entry-put nil "TITLE" (org-capture-ai--sanitize-property-value title))

@@ -414,5 +414,48 @@ File: org-capture-ai.el"
                       (org-entry-end-position))))
            (should-not (string-match-p "^- " body))))))))
 
+(ert-deftest org-capture-ai-regression-20260315-reading-time-set ()
+  "Regression: READING_TIME property is set after processing.
+
+Bug: Without reading time estimation, users have no quick way to judge
+whether an article is worth reading now or saving for later.
+
+Fix: org-capture-ai--estimate-reading-time computes word count and
+divides by org-capture-ai-reading-wpm (default 238 wpm), storing
+the result in the READING_TIME property.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/article"))
+            (entry-pos (marker-position marker)))
+
+       (org-capture-ai--async-process marker)
+       (org-capture-ai-test--wait-for-processing marker)
+
+       (goto-char entry-pos)
+       (org-back-to-heading t)
+
+       (should (equal "completed" (org-entry-get nil "STATUS")))
+       (let ((reading-time (org-entry-get nil "READING_TIME")))
+         (should reading-time)
+         (should (string-match-p "[0-9]+ min" reading-time)))))))
+
+(ert-deftest org-capture-ai-regression-20260315-reading-time-minimum-one-min ()
+  "Regression: READING_TIME is at least '1 min' for very short content.
+
+Bug: For articles with fewer words than the wpm rate, dividing and
+rounding could produce 0, which is misleading.
+
+Fix: org-capture-ai--estimate-reading-time uses (max 1 ...) to
+ensure the minimum displayed value is '1 min'.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (should (string= "1 min"
+                   (org-capture-ai--estimate-reading-time "Short article."))))
+
 (provide 'org-capture-ai-regression-test)
 ;;; org-capture-ai-regression-test.el ends here
