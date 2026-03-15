@@ -852,12 +852,12 @@ Returns early with a log message if the entry has no URL property."
             ('skip
              (org-capture-ai--set-status marker "duplicate")
              (setq org-capture-ai--processing-markers
-                   (delq (marker-position marker) org-capture-ai--processing-markers))
+                   (cl-delete (marker-position marker) org-capture-ai--processing-markers :test #'=))
              (set-marker marker nil)
              (message "org-capture-ai: Duplicate URL skipped (already captured: \"%s\")"
                       dup-heading)
              (cl-return-from org-capture-ai--async-process))
-            ((or 'warn 'update)
+            (_
              (message "org-capture-ai: Warning: URL already captured as \"%s\"" dup-heading))))
 
         (message "org-capture-ai: Fetching %s" url)
@@ -965,7 +965,7 @@ and invalidates it."
         (message "org-capture-ai: Processing complete"))
     (org-capture-ai--set-status marker "error" "Tag extraction failed"))
   (setq org-capture-ai--processing-markers
-        (delq (marker-position marker) org-capture-ai--processing-markers))
+        (cl-delete (marker-position marker) org-capture-ai--processing-markers :test #'=))
   (org-capture-ai--log "Removed marker %d from processing list" (marker-position marker))
   (set-marker marker nil))
 
