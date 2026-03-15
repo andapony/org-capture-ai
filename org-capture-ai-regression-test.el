@@ -306,5 +306,104 @@ File: org-capture-ai.el"
          (should (equal "completed" (org-entry-get nil "STATUS")))
          (should (null (org-entry-get nil "TAKEAWAYS"))))))))
 
+(ert-deftest org-capture-ai-regression-20260315-duplicate-only-matches-completed ()
+  "Regression: find-duplicate ignores entries that are not STATUS=completed.
+
+Bug: Without the STATUS=completed filter, a queued or errored entry with
+the same URL would block a legitimate reprocessing attempt.
+
+Fix: org-capture-ai--find-duplicate uses the \"STATUS=\\\"completed\\\"\"
+org-map-entries match expression, so only completed entries are considered
+duplicates.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-default-file org-capture-ai-test--temp-file)
+         (test-url "https://example.com/test-article"))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+
+       ;; Create entries with non-completed statuses for the same URL
+       (dolist (status '("queued" "fetch-error" "error" "processing"))
+         (goto-char (point-max))
+         (insert (format "** Entry with status %s\n" status))
+         (insert ":PROPERTIES:\n")
+         (insert ":URL: " test-url "\n")
+         (insert (format ":STATUS: %s\n" status))
+         (insert ":END:\n\n"))
+
+       ;; find-duplicate should return nil — none of these are completed
+       (should (null (org-capture-ai--find-duplicate test-url)))
+
+       ;; Now add a completed entry and verify it IS found
+       (org-capture-ai-test--create-completed-entry test-url "Completed Article")
+       (should (equal "Completed Article"
+                      (org-capture-ai--find-duplicate test-url)))))))
+
+(ert-deftest org-capture-ai-regression-20260315-duplicate-update-continues ()
+  "Regression: Duplicate URL with update action continues processing.
+
+Bug: The update action (reserved for future update-in-place) should not
+silently swallow the entry — it should process normally like warn.
+
+Fix: The pcase wildcard clause handles both warn and update identically,
+emitting a message and falling through to full processing.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-duplicate-action 'update)
+         (org-capture-ai-default-file org-capture-ai-test--temp-file)
+         (test-url "https://example.com/test-article"))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+
+       (org-capture-ai-test--create-completed-entry test-url "Existing Article")
+
+       (let* ((marker (org-capture-ai-test--create-processing-entry test-url))
+              (entry-pos (marker-position marker)))
+
+         (org-capture-ai--async-process marker)
+         (org-capture-ai-test--wait-for-processing marker)
+
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+
+         (should (equal "completed" (org-entry-get nil "STATUS"))))))))
+
+(ert-deftest org-capture-ai-regression-20260315-takeaways-failure-still-completes ()
+  "Regression: LLM failure during takeaways extraction still sets STATUS=completed.
+
+Bug: If the takeaways LLM call fails, the entry should still be considered
+successfully processed since summary and tags succeeded.
+
+Fix: org-capture-ai--finalize-entry is called with the original tags value
+regardless of whether takeaways returned nil, so STATUS=completed is set
+as long as tags succeeded.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-extract-takeaways t)
+         ;; Override mock so takeaways call returns nil (simulates LLM failure)
+         (org-capture-ai-test--mock-llm-responses
+          '((:summary . "TITLE: Test Title\nSUMMARY: This is a test summary. It has multiple sentences. Testing works.")
+            (:tags . "article, test, emacs")
+            (:takeaways . nil))))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+       (let* ((marker (org-capture-ai-test--create-processing-entry
+                       "https://example.com/article"))
+              (entry-pos (marker-position marker)))
+
+         (org-capture-ai--async-process marker)
+         (org-capture-ai-test--wait-for-processing marker)
+
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+
+         ;; Should complete even though takeaways failed
+         (should (equal "completed" (org-entry-get nil "STATUS")))
+         ;; TAKEAWAYS should be absent — nil response means nothing was stored
+         (should (null (org-entry-get nil "TAKEAWAYS"))))))))
+
 (provide 'org-capture-ai-regression-test)
 ;;; org-capture-ai-regression-test.el ends here
