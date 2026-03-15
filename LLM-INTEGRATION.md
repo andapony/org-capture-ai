@@ -11,13 +11,15 @@ Web Content → Readability Filter → Text Extraction → LLM Processing → Pr
                                                      ↓
                                             (1) Summarization
                                             (2) Tag Extraction
+                                            (3) Takeaway Extraction (if enabled)
 ```
 
-The LLM interaction happens in two sequential phases:
-1. **Summarization** - Generates title and summary (callback-based)
-2. **Tag Extraction** - Extracts relevant tags (triggered by summarization callback)
+The LLM interaction happens in three sequential phases:
+1. **Summarization** - Generates title and summary; first sentence becomes DESCRIPTION
+2. **Tag Extraction** - Extracts relevant tags into the SUBJECT property (triggered by summarization callback)
+3. **Takeaway Extraction** - Extracts 3-5 key insights into TAKEAWAYS (if `org-capture-ai-extract-takeaways` is non-nil)
 
-This sequential approach ensures properties are set in the correct order and allows the tag extraction to potentially leverage the summary context.
+This sequential approach ensures properties are set in the correct order and allows each phase to potentially leverage the previous result.
 
 ## Core Integration Layer
 
@@ -121,7 +123,7 @@ IMPORTANT:
 Users control:
 - `org-capture-ai-summary-sentences` (default: 3)
 - `org-capture-ai-summary-overview-sentences` (default: 3)
-- `org-capture-ai-summary-topic-max-sentences` (default: 4)
+- `org-capture-ai-summary-topic-max-sentences` (default: 5)
 - `org-capture-ai-summary-topic-paragraphs` (default: `'auto`)
 
 ### Tag Extraction Prompt
@@ -168,10 +170,10 @@ Example: article, programming, reference, authoritative
 **Configurability:**
 
 Users can customize the tag lists:
-- `org-capture-ai-curated-tags-type`
-- `org-capture-ai-curated-tags-domain`
-- `org-capture-ai-curated-tags-status`
-- `org-capture-ai-curated-tags-quality`
+- `org-capture-ai-tags-type`
+- `org-capture-ai-tags-domain`
+- `org-capture-ai-tags-status`
+- `org-capture-ai-tags-quality`
 
 #### Free-Form Tags (optional)
 
@@ -201,6 +203,32 @@ Guidelines:
 **Trade-offs:**
 - **Pros**: Captures specific topics not in curated lists
 - **Cons**: Can generate inconsistent vocabulary, synonyms, spelling variants
+
+### Takeaway Extraction Prompt
+
+When `org-capture-ai-extract-takeaways` is non-nil (the default):
+
+```
+Extract 3-5 key takeaways from this content.
+Each takeaway must be a single, self-contained sentence capturing one important insight.
+Return ONLY a numbered list, one takeaway per line, no extra text.
+```
+
+**Design rationale:**
+
+- **Numbered list format** - Easy to parse line-by-line with regex
+- **"self-contained sentence"** - Each takeaway must stand alone for search/display
+- **3-5 range** - Enough for depth without overwhelming
+
+**Output:** Stored in the `TAKEAWAYS` property as pipe-separated sentences:
+```
+First insight here. | Second insight here. | Third insight here.
+```
+
+**Disabling takeaways:**
+```elisp
+(setq org-capture-ai-extract-takeaways nil)
+```
 
 ### Response Parsing
 
@@ -334,21 +362,16 @@ All errors result in `(callback nil info)` where `info` contains `:status` with 
 
 ### Retry Logic
 
-**Current implementation:** No automatic retries at LLM layer.
+**Current implementation:** Configurable retries via `org-capture-ai-max-retries` (default: 3).
+
+When an LLM request returns a nil response (transient failure), the request is retried
+up to `org-capture-ai-max-retries` times before recording an error.
 
 **Rationale:**
-- LLM failures are typically permanent (bad API key, rate limit)
-- Network failures are handled at URL fetch layer
-- Users can manually retry with `org-capture-ai-reprocess-entry`
-
-**Future enhancement:**
-
-Could add configurable retry with exponential backoff:
-```elisp
-(defcustom org-capture-ai-max-retries 3
-  "Maximum number of LLM request retries."
-  :type 'integer)
-```
+- Transient failures (rate limits, timeouts) are retried automatically
+- Permanent failures (bad API key, invalid model) are surfaced as errors
+- Network failures at URL fetch layer are handled separately
+- Users can always manually retry with `org-capture-ai-reprocess-entry`
 
 ## Property Management
 
@@ -466,9 +489,12 @@ org-capture-ai: Processing complete
 ;; Enable detailed logging
 (setq org-capture-ai-enable-logging t)
 
-;; Customize curated tag lists
+;; Customize curated tag domain list
 (setq org-capture-ai-tags-domain
       '("emacs" "lisp" "ai" "web_dev" "data_science"))
+
+;; Disable takeaway extraction
+(setq org-capture-ai-extract-takeaways nil)
 ```
 
 ## Best Practices

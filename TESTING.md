@@ -12,6 +12,7 @@ Run specific test suite:
 ./run-tests.sh regression    # Regression tests only
 ./run-tests.sh error         # Error condition tests
 ./run-tests.sh integration   # Integration tests (v2)
+./run-tests.sh fetch         # Real HTTP fetch tests (requires Python 3)
 ./run-tests.sh legacy        # Original integration tests
 ```
 
@@ -24,6 +25,7 @@ org-capture-ai/
 ├── org-capture-ai-regression-test.el      # Tests for specific bugs
 ├── org-capture-ai-error-test.el           # Error condition tests
 ├── org-capture-ai-integration-test-v2.el  # Integration tests (new)
+├── org-capture-ai-fetch-test.el           # Real HTTP fetch tests
 ├── org-capture-ai-integration-test.el     # Legacy integration tests
 └── test-fixtures/                         # Test data
     ├── html/                              # HTML fixtures
@@ -46,6 +48,13 @@ Tests for specific bugs that were found and fixed. Each test documents:
 - `org-capture-ai-regression-20251027-duplicate-processing` - Hook duplication causing double processing
 - `org-capture-ai-regression-20251027-heading-replacement` - replace-match destroying heading structure
 - `org-capture-ai-regression-unit-sanitize-property-value` - Property value sanitization function
+- `org-capture-ai-regression-20260315-duplicate-skip` - Duplicate URL detection with `skip` action
+- `org-capture-ai-regression-20260315-duplicate-warn` - Duplicate URL detection with `warn` action
+- `org-capture-ai-regression-20260315-takeaways-extracted` - Key takeaways extracted and stored in TAKEAWAYS
+- `org-capture-ai-regression-20260315-takeaways-disabled` - Takeaways skipped when `org-capture-ai-extract-takeaways` is nil
+- `org-capture-ai-regression-20260315-duplicate-only-matches-completed` - Duplicate check only matches STATUS=completed
+- `org-capture-ai-regression-20260315-duplicate-update-continues` - `warn` action still completes processing
+- `org-capture-ai-regression-20260315-takeaways-failure-still-completes` - Processing completes even if takeaways LLM call fails
 
 **When to add a regression test:**
 Every time you fix a bug, create a regression test that:
@@ -74,7 +83,17 @@ End-to-end tests of the full capture workflow:
 - Idempotent setup
 - Performance benchmarks
 
-#### 4. Legacy Integration Tests (`org-capture-ai-integration-test.el`)
+#### 4. Fetch Tests (`org-capture-ai-fetch-test.el`)
+
+Real HTTP fetch tests that spin up a local Python HTTP server and exercise both
+fetch methods end-to-end:
+- `curl` method: success, missing file (404), connection refused
+- `builtin` (`url-retrieve`) method: success, connection refused
+- Dispatch function: selecting `curl` vs `builtin` based on `org-capture-ai-fetch-method`
+
+Requires Python 3. Run with `./run-tests.sh fetch`.
+
+#### 5. Legacy Integration Tests (`org-capture-ai-integration-test.el`)
 
 Original integration tests (preserved for compatibility):
 - Full capture workflow
@@ -114,17 +133,22 @@ Shared utilities for all tests:
   "Description of what this tests."
   (org-capture-ai-test--with-mocked-env
    (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
-     (let ((marker (org-capture-ai-test--create-processing-entry
-                    "https://example.com/test")))
+     (let* ((marker (org-capture-ai-test--create-processing-entry
+                     "https://example.com/test"))
+            (entry-pos (marker-position marker)))  ; Save position before processing
 
        ;; Process the entry
        (org-capture-ai--async-process marker)
 
-       ;; Wait for completion
+       ;; Wait for completion (marker is invalidated after processing)
        (org-capture-ai-test--wait-for-processing marker)
 
+       ;; Navigate back using saved position
+       (goto-char entry-pos)
+       (org-back-to-heading t)
+
        ;; Assertions
-       (should (equal "completed" (org-entry-get nil "STATUS" marker)))
+       (should (equal "completed" (org-entry-get nil "STATUS")))
        (should (= 1 (org-capture-ai-test--count-properties-drawers)))))))
 ```
 
@@ -161,7 +185,7 @@ Shared utilities for all tests:
        (org-capture-ai-test--wait-for-processing marker)
 
        ;; Should be in error state
-       (should (equal "fetch-error" (org-entry-get nil "STATUS" marker)))))))
+       (should (equal "fetch-error" (org-entry-get nil "STATUS")))))))
 ```
 
 ### Adding Test Fixtures

@@ -9,19 +9,19 @@ This repository contains **org-capture-ai**, a complete Emacs library for AI-enh
 ### Files
 
 - `org-capture-ai.el` - Main library implementing async URL capture with LLM processing
-- `org-capture-ai-test.el` - ERT test suite
 - `README.md` - User documentation and installation guide
 - `examples/init-example.el` - Example configurations
 - `org-capture-ai-implementation-guide.md` - Original technical implementation guide
 - `LLM-INTEGRATION.md` - Detailed documentation of LLM interaction and prompt engineering
 - `guide-bookmark-classification.md` - Comprehensive guide to bookmark classification systems
+- `TESTING.md` - Full test documentation
 
 ## Architecture
 
 ### Core Workflow
 
 ```
-Capture → Finalize → Fetch URL → Extract Content → Call LLM → Update Properties
+Capture → Finalize → Fetch URL → Extract Content → Summarize → Extract Tags → Extract Takeaways → Update Properties
 ```
 
 All processing is asynchronous to avoid blocking Emacs UI.
@@ -36,8 +36,8 @@ All processing is asynchronous to avoid blocking Emacs UI.
 
 2. **LLM Integration Layer** (`org-capture-ai-llm-*`)
    - Wraps `gptel-request` for non-interactive LLM queries
-   - Generates summaries and extracts tags
-   - Retry logic for failed requests
+   - Generates summaries, extracts tags, and optionally extracts key takeaways
+   - Retry logic for failed requests (`org-capture-ai-max-retries`)
 
 3. **Capture Integration** (`org-capture-ai--process-entry`, `org-capture-ai--async-process`)
    - Hooks into `org-capture-after-finalize-hook`
@@ -53,6 +53,7 @@ All processing is asynchronous to avoid blocking Emacs UI.
 
 Entries progress through STATUS property values:
 - `processing` → `fetching` → `processing` → `completed`
+- Duplicate state: `duplicate` (URL already captured; see `org-capture-ai-duplicate-action`)
 - Error states: `fetch-error`, `error` (with ERROR property)
 - Queue state: `queued` (for batch processing)
 
@@ -83,6 +84,7 @@ Run specific test suite:
 ./run-tests.sh regression    # Regression tests (most important)
 ./run-tests.sh error         # Error condition tests
 ./run-tests.sh integration   # Integration tests
+./run-tests.sh fetch         # Real HTTP fetch tests (requires Python 3)
 ```
 
 ### Test Infrastructure
@@ -110,9 +112,13 @@ The test suite is organized into multiple specialized files:
    - Fixture-based testing
    - Performance benchmarks
 
-5. **`test-fixtures/`** - Test data
+5. **`org-capture-ai-fetch-test.el`** - Real HTTP fetch tests
+   - Spins up a local Python HTTP server
+   - Tests `curl` and `builtin` fetch methods end-to-end
+
+6. **`test-fixtures/`** - Test data
    - `html/` - HTML pages for various scenarios
-   - `llm-responses/` - Mock LLM responses
+   - `llm-responses/` - Mock LLM responses (inline in tests currently)
    - `snapshots/` - Expected outputs
 
 ### Test-Driven Development Workflow
@@ -304,7 +310,26 @@ These bugs have been fixed and have regression tests to prevent recurrence:
 
 All three bugs are covered by regression tests in `org-capture-ai-regression-test.el`. Run `./run-tests.sh regression` to verify they stay fixed.
 
+### Features Added (2026-03-15)
+
+1. **Duplicate URL detection** (`org-capture-ai-duplicate-action`)
+   - Checks for existing completed entries with the same URL before fetching
+   - `'warn` (default): logs a warning and continues processing
+   - `'skip`: sets STATUS=`duplicate` and stops immediately
+   - **Tests**: `org-capture-ai-regression-20260315-duplicate-*`
+
+2. **Key takeaways extraction** (`org-capture-ai-extract-takeaways`)
+   - Third LLM phase: extracts 3-5 key insights from the article
+   - Stored in the TAKEAWAYS property as pipe-separated sentences
+   - Enabled by default; set to `nil` to disable
+   - **Tests**: `org-capture-ai-regression-20260315-takeaways-*`
+
+3. **Configurable fetch method** (`org-capture-ai-fetch-method`)
+   - `'curl` (default): uses `curl` subprocess; more compatible with paywalled/JS-heavy sites
+   - `'builtin`: uses Emacs built-in `url-retrieve`
+   - **Tests**: `org-capture-ai-fetch-test.el`
+
 ## Git Configuration
 
 - Default branch: `main`
-- This is a local repository with no configured remote
+- Remote: `git@github.com:andapony/org-capture-ai.git`

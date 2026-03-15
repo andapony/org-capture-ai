@@ -9,15 +9,17 @@ AI-enhanced URL capture for Emacs org-mode using LLMs. Automatically fetch web c
 - **Dublin Core Metadata**: Extracts standardized metadata (ISO 15836) from web pages
 - **AI Summaries**: Generate concise summaries of captured web content
 - **Automatic Tagging**: Extract relevant topic tags using LLMs
+- **Key Takeaways**: Optionally extract 3-5 bullet-point insights from each article
+- **Duplicate Detection**: Detects URLs already captured; configurable skip or warn behavior
 - **Batch Processing**: Queue entries for later processing during idle time
-- **Retry Logic**: Automatically retry failed LLM requests
+- **Flexible Fetch**: Choose between `curl` (recommended for Substack/paywalled sites) or built-in `url-retrieve`
 - **Status Tracking**: Property-based state machine tracks processing status
 - **Flexible Configuration**: Customizable via Emacs customization system
 
 ## Workflow
 
 ```
-Capture → Finalize → Fetch URL → Extract Content → Call LLM → Update Properties
+Capture → Finalize → Fetch URL → Extract Content → Summarize → Extract Tags → Extract Takeaways → Update Properties
 ```
 
 All processing happens asynchronously after the capture is finalized.
@@ -97,25 +99,30 @@ This will:
 
 ### Customization Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `org-capture-ai-default-file` | `"~/Sync/org/bookmarks.org"` | Target file for captures |
-| `org-capture-ai-template-key` | `"u"` | Capture template key |
-| `org-capture-ai-summary-style` | `'sentences` | Summary format: `'sentences` (single) or `'paragraphs` (multi) |
-| `org-capture-ai-summary-sentences` | `3` | Sentences in single-paragraph summaries (when style is `'sentences`) |
-| `org-capture-ai-summary-overview-sentences` | `3` | Sentences in overview paragraph (when style is `'paragraphs`) |
-| `org-capture-ai-summary-topic-paragraphs` | `'auto` | Number of topic paragraphs (`'auto` or integer) |
-| `org-capture-ai-summary-topic-max-sentences` | `5` | Max sentences per topic paragraph |
-| `org-capture-ai-use-curated-tags` | `t` | Use curated faceted tags instead of free-form |
-| `org-capture-ai-tag-count` | `5` | Maximum tags (free-form mode only) |
-| `org-capture-ai-tags-type` | see below | Curated tags for content type/format |
-| `org-capture-ai-tags-status` | see below | Curated tags for status/lifecycle |
-| `org-capture-ai-tags-quality` | see below | Curated tags for quality/authority |
-| `org-capture-ai-tags-domain` | see below | Curated tags for domain/subject (customizable) |
-| `org-capture-ai-max-retries` | `3` | Retry attempts for failed LLM requests |
-| `org-capture-ai-enable-logging` | `t` | Enable logging to `*org-capture-ai-log*` |
-| `org-capture-ai-batch-idle-time` | `300` | Seconds before processing queued entries (nil to disable) |
-| `org-capture-ai-process-on-capture` | `t` | Process immediately (nil to queue for later) |
+| Variable                                 | Default                   | Description                                                        |
+|------------------------------------------|---------------------------|--------------------------------------------------------------------|
+| `org-capture-ai-default-file`            | `"~/Sync/bookmarks.org"`  | Target file for captures                                           |
+| `org-capture-ai-template-key`            | `"u"`                     | Capture template key                                               |
+| `org-capture-ai-fetch-method`            | `'curl`                   | URL fetch method: `'curl` or `'builtin`                            |
+| `org-capture-ai-summary-style`           | `'sentences`              | Summary format: `'sentences` (single) or `'paragraphs` (multi)    |
+| `org-capture-ai-summary-sentences`       | `3`                       | Sentences in single-paragraph summaries                            |
+| `org-capture-ai-summary-overview-sentences` | `3`                    | Sentences in overview paragraph (when style is `'paragraphs`)      |
+| `org-capture-ai-summary-topic-paragraphs` | `'auto`                  | Number of topic paragraphs (`'auto` or integer)                    |
+| `org-capture-ai-summary-topic-max-sentences` | `5`                   | Max sentences per topic paragraph                                  |
+| `org-capture-ai-extract-takeaways`       | `t`                       | Extract 3-5 key takeaways (stored in TAKEAWAYS property)           |
+| `org-capture-ai-duplicate-action`        | `'warn`                   | Action when URL already captured: `'warn` or `'skip`               |
+| `org-capture-ai-use-curated-tags`        | `t`                       | Use curated faceted tags instead of free-form                      |
+| `org-capture-ai-tag-count`               | `5`                       | Maximum tags (free-form mode only)                                 |
+| `org-capture-ai-tags-type`               | see below                 | Curated tags for content type/format                               |
+| `org-capture-ai-tags-status`             | see below                 | Curated tags for status/lifecycle                                  |
+| `org-capture-ai-tags-quality`            | see below                 | Curated tags for quality/authority                                 |
+| `org-capture-ai-tags-domain`             | see below                 | Curated tags for domain/subject (customizable)                     |
+| `org-capture-ai-max-retries`             | `3`                       | Retry attempts for failed LLM requests                             |
+| `org-capture-ai-max-content-length`      | `50000`                   | Maximum characters of page content sent to LLM                     |
+| `org-capture-ai-enable-logging`          | `t`                       | Enable logging to `*org-capture-ai-log*`                           |
+| `org-capture-ai-batch-idle-time`         | `300`                     | Seconds before processing queued entries (nil to disable)          |
+| `org-capture-ai-batch-concurrency`       | `3`                       | Maximum entries processed concurrently in batch mode               |
+| `org-capture-ai-process-on-capture`      | `t`                       | Process immediately (nil to queue for later)                       |
 
 ### Faceted Tagging System
 
@@ -225,22 +232,22 @@ production-ready patterns for org-mode workflows.
 
 org-capture-ai extracts metadata following the [Dublin Core Metadata Element Set](https://www.dublincore.org/specifications/dublin-core/dces/) (ISO 15836):
 
-| Property | Dublin Core Element | Description |
-|----------|-------------------|-------------|
-| `TITLE` | dc:title | Page title from HTML or meta tags |
-| `CREATOR` | dc:creator | Author name (from meta tags, byline, or schema.org) |
-| `SUBJECT` | dc:subject | AI-extracted topic keywords |
-| `DESCRIPTION` | dc:description | Meta description from page |
-| `PUBLISHER` | dc:publisher | Domain name or site name |
-| `DATE` | dc:date | Publication date (from meta tags or article) |
-| `TYPE` | dc:type | Resource type (usually "Text") |
-| `FORMAT` | dc:format | Media type (text/html, application/pdf) |
-| `IDENTIFIER` | dc:identifier | URL (stored in URL property) |
-| `LANGUAGE` | dc:language | Language code (from `<html lang>` attribute) |
-| `RIGHTS` | dc:rights | Copyright/license information |
-| `SOURCE` | dc:source | Original source if content is derived/reposted |
-| `RELATION` | dc:relation | Related resources |
-| `COVERAGE` | dc:coverage | Spatial or temporal coverage |
+| Property      | Dublin Core Element | Description                                         |
+|---------------|---------------------|-----------------------------------------------------|
+| `TITLE`       | dc:title            | Page title from HTML or meta tags                   |
+| `CREATOR`     | dc:creator          | Author name (from meta tags, byline, or schema.org) |
+| `SUBJECT`     | dc:subject          | AI-extracted topic keywords                         |
+| `DESCRIPTION` | dc:description      | Meta description from page                          |
+| `PUBLISHER`   | dc:publisher        | Domain name or site name                            |
+| `DATE`        | dc:date             | Publication date (from meta tags or article)        |
+| `TYPE`        | dc:type             | Resource type (usually "Text")                      |
+| `FORMAT`      | dc:format           | Media type (text/html, application/pdf)             |
+| `IDENTIFIER`  | dc:identifier       | URL (stored in URL property)                        |
+| `LANGUAGE`    | dc:language         | Language code (from `<html lang>` attribute)        |
+| `RIGHTS`      | dc:rights           | Copyright/license information                       |
+| `SOURCE`      | dc:source           | Original source if content is derived/reposted      |
+| `RELATION`    | dc:relation         | Related resources                                   |
+| `COVERAGE`    | dc:coverage         | Spatial or temporal coverage                        |
 
 Properties are only set when metadata is available in the source HTML.
 
@@ -250,8 +257,8 @@ Entries progress through these states:
 
 - `processing` - Initial state after capture
 - `fetching` - Downloading URL content
-- `processing` - Calling LLM for analysis
 - `completed` - Successfully processed
+- `duplicate` - URL already captured (see `org-capture-ai-duplicate-action`)
 - `queued` - Waiting for batch processing
 - `reprocessing` - Manually reprocessing entry
 - `refreshing` - Refreshing entry (replacing content)
@@ -304,16 +311,27 @@ Or set `org-capture-ai-process-on-capture` to `nil` to queue all captures and pr
 
 Run the test suite:
 
-```elisp
-(load-file "org-capture-ai-test.el")
-(org-capture-ai-run-tests)
+```bash
+./run-tests.sh        # all suites
+make test             # equivalent
 ```
 
-Or run individual tests:
+Run a specific suite:
+
+```bash
+./run-tests.sh regression   # regression tests
+./run-tests.sh error        # error condition tests
+./run-tests.sh integration  # integration tests
+./run-tests.sh fetch        # real HTTP fetch tests (requires Python 3)
+```
+
+Or run individual tests interactively from Emacs:
 
 ```elisp
-M-x ert RET org-capture-ai-test- TAB
+M-x ert RET org-capture-ai- TAB
 ```
+
+See [TESTING.md](TESTING.md) for full documentation.
 
 ## Architecture
 
@@ -323,12 +341,14 @@ M-x ert RET org-capture-ai-test- TAB
 org-capture-after-finalize-hook
   → org-capture-ai--process-entry
     → org-capture-ai--async-process
+      → org-capture-ai--find-duplicate (check for existing URL)
       → org-capture-ai-fetch-url (async)
         → org-capture-ai--process-html
           → org-capture-ai-extract-readable-content
           → org-capture-ai--llm-analyze
             → org-capture-ai-llm-summarize (async)
             → org-capture-ai-llm-extract-tags (async)
+            → org-capture-ai-llm-extract-takeaways (async, if enabled)
               → Update properties via markers
 ```
 
@@ -462,6 +482,6 @@ GPLv3 or later
 
 ## Acknowledgments
 
-Based on patterns described in [Building an Org-Mode URL Capture System with LLM-Based Tagging and Summarization](compass_artifact_wf-cde1f498-4f12-4f9e-ab11-d78f7be83f24_text_markdown.md).
+Based on patterns described in `org-capture-ai-implementation-guide.md` in this repository.
 
 Built on the excellent [gptel](https://github.com/karthink/gptel) library by Karthik Chikmagalur.
