@@ -251,13 +251,13 @@ File: org-capture-ai.el"
          (should (equal "completed" (org-entry-get nil "STATUS"))))))))
 
 (ert-deftest org-capture-ai-regression-20260315-takeaways-extracted ()
-  "Regression: TAKEAWAYS property is set when extraction is enabled.
+  "Regression: Takeaways are inserted as a bullet list before the summary.
 
 Bug: Without takeaways feature, there is no way to get a quick overview
 of an article's key insights without reading the full summary.
 
 Fix: org-capture-ai-llm-extract-takeaways runs as a third LLM step after
-tags, storing results in TAKEAWAYS as pipe-separated sentences.
+tags, inserting a bullet list immediately before the summary paragraph.
 
 Date: 2026-03-15
 File: org-capture-ai.el"
@@ -275,18 +275,20 @@ File: org-capture-ai.el"
          (org-back-to-heading t)
 
          (should (equal "completed" (org-entry-get nil "STATUS")))
-         (let ((takeaways (org-entry-get nil "TAKEAWAYS")))
-           (should takeaways)
-           ;; Should contain at least one pipe-separated takeaway
-           (should (string-match-p "\\." takeaways))))))))
+         ;; Takeaways should appear as bullet lines in the body
+         (let ((body (buffer-substring-no-properties
+                      (progn (org-end-of-meta-data) (point))
+                      (org-entry-end-position))))
+           (should (string-match-p "^- " body))
+           (should (string-match-p "^- .*\\." body))))))))
 
 (ert-deftest org-capture-ai-regression-20260315-takeaways-disabled ()
-  "Regression: No TAKEAWAYS property when extraction is disabled.
+  "Regression: No bullet takeaways in body when extraction is disabled.
 
 Bug: Users who want to reduce API costs should be able to skip takeaways.
 
 Fix: When org-capture-ai-extract-takeaways is nil, the third LLM call is
-skipped and TAKEAWAYS is not set.
+skipped and no bullet list is inserted in the body.
 
 Date: 2026-03-15
 File: org-capture-ai.el"
@@ -304,7 +306,11 @@ File: org-capture-ai.el"
          (org-back-to-heading t)
 
          (should (equal "completed" (org-entry-get nil "STATUS")))
-         (should (null (org-entry-get nil "TAKEAWAYS"))))))))
+         ;; No bullet lines should appear in body
+         (let ((body (buffer-substring-no-properties
+                      (progn (org-end-of-meta-data) (point))
+                      (org-entry-end-position))))
+           (should-not (string-match-p "^- " body))))))))
 
 (ert-deftest org-capture-ai-regression-20260315-duplicate-only-matches-completed ()
   "Regression: find-duplicate ignores entries that are not STATUS=completed.
@@ -402,8 +408,11 @@ File: org-capture-ai.el"
 
          ;; Should complete even though takeaways failed
          (should (equal "completed" (org-entry-get nil "STATUS")))
-         ;; TAKEAWAYS should be absent — nil response means nothing was stored
-         (should (null (org-entry-get nil "TAKEAWAYS"))))))))
+         ;; No bullet lines should appear in body since takeaways returned nil
+         (let ((body (buffer-substring-no-properties
+                      (progn (org-end-of-meta-data) (point))
+                      (org-entry-end-position))))
+           (should-not (string-match-p "^- " body))))))))
 
 (provide 'org-capture-ai-regression-test)
 ;;; org-capture-ai-regression-test.el ends here

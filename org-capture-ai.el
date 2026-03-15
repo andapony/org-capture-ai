@@ -231,7 +231,7 @@ risk of hitting API rate limits."
 
 (defcustom org-capture-ai-extract-takeaways t
   "When non-nil, extract 3-5 key takeaways in addition to summary and tags.
-Takeaways are stored in the TAKEAWAYS property as pipe-separated sentences.
+Takeaways are inserted as a bullet list immediately before the summary paragraph.
 Each takeaway is a single sentence distilling one important insight.
 Set to nil to disable this step and reduce LLM API call count by one."
   :type 'boolean
@@ -983,8 +983,8 @@ Otherwise runs up to three sequential LLM calls:
    Stores them in the SUBJECT property (comma-separated) and as org
    headline tags.
 3. `org-capture-ai-llm-extract-takeaways' (when `org-capture-ai-extract-takeaways'
-   is non-nil): extracts 3-5 key insights, stored in the TAKEAWAYS
-   property as pipe-separated sentences.
+   is non-nil): extracts 3-5 key insights, inserted as a bullet list
+   immediately before the summary paragraph in the entry body.
 On completion, sets STATUS to \"completed\" and records PROCESSED_AT,
 then removes MARKER from `org-capture-ai--processing-markers' and
 invalidates it."
@@ -1072,9 +1072,13 @@ invalidates it."
                         (save-excursion
                           (org-with-point-at marker
                             (org-back-to-heading t)
-                            (org-entry-put nil "TAKEAWAYS"
-                                           (org-capture-ai--sanitize-property-value
-                                            (mapconcat #'identity takeaways " | "))))))
+                            ;; Insert bullet list before the summary paragraph
+                            (org-end-of-meta-data)
+                            (forward-line 1) ; skip the blank line after :END:
+                            (let ((bullet-text
+                                   (mapconcat (lambda (s) (format "- %s" s))
+                                              takeaways "\n")))
+                              (insert bullet-text "\n\n")))))
                       (org-capture-ai--finalize-entry marker tags)))
                 (org-capture-ai--finalize-entry marker tags))))))))))
 
