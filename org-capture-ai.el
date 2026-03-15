@@ -45,12 +45,17 @@
   :prefix "org-capture-ai-")
 
 (defcustom org-capture-ai-default-file "~/Sync/bookmarks.org"
-  "Default file for AI-enhanced URL captures."
+  "Org file where URL captures are stored.
+This file must exist before captures can be saved.  Entries are added
+under a \"Bookmarks\" heading created by the capture template."
   :type 'file
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-template-key "u"
-  "Default capture template key for URL capture."
+  "Key used to invoke the URL capture template in `org-capture'.
+Registered in `org-capture-templates' by `org-capture-ai-setup'.
+The default \"u\" is invoked by pressing this key in the `org-capture'
+dispatcher."
   :type 'string
   :group 'org-capture-ai)
 
@@ -62,8 +67,12 @@ Only used when `org-capture-ai-summary-style' is 'sentences."
 
 (defcustom org-capture-ai-summary-style 'sentences
   "Style of AI-generated summaries.
-- 'sentences: Single paragraph with N sentences (default)
-- 'paragraphs: Multi-paragraph with overview + topic sections"
+- `sentences': Single paragraph with a fixed number of sentences.
+  Length controlled by `org-capture-ai-summary-sentences'.
+- `paragraphs': Overview paragraph followed by per-topic paragraphs.
+  Lengths controlled by `org-capture-ai-summary-overview-sentences',
+  `org-capture-ai-summary-topic-max-sentences', and
+  `org-capture-ai-summary-topic-paragraphs'."
   :type '(choice (const :tag "Single paragraph (sentences)" sentences)
                  (const :tag "Multi-paragraph (overview + topics)" paragraphs))
   :group 'org-capture-ai)
@@ -157,12 +166,17 @@ Customize by adding/removing tags based on your collection focus and usage patte
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-max-retries 3
-  "Maximum number of retry attempts for failed LLM requests."
+  "Maximum number of attempts for a single LLM request.
+On each failure the request is retried with exponential backoff: 2 seconds
+before the second attempt, 4 before the third, and so on.
+Synchronous errors (e.g., gptel not configured) are not retried."
   :type 'integer
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-enable-logging t
-  "Enable logging to *org-capture-ai-log* buffer."
+  "Non-nil means log debug messages to the `*org-capture-ai-log*' buffer.
+Each entry is timestamped.  Useful for diagnosing fetch or LLM failures.
+Disable to reduce buffer clutter once the library is working correctly."
   :type 'boolean
   :group 'org-capture-ai)
 
@@ -194,8 +208,11 @@ Set this if you capture URLs to multiple org files."
   :group 'org-capture-ai)
 
 (defcustom org-capture-ai-batch-concurrency 3
-  "Maximum number of simultaneous URL fetches during batch processing.
-Higher values process the queue faster but may trigger rate limiting."
+  "Maximum number of concurrent pipeline slots during batch processing.
+Each slot covers the full fetch-plus-LLM pipeline for one entry, so
+this setting limits both simultaneous HTTP connections and overlapping
+LLM requests.  Higher values process the queue faster but increase the
+risk of hitting API rate limits."
   :type 'integer
   :group 'org-capture-ai)
 
@@ -213,8 +230,9 @@ Higher values process the queue faster but may trigger rate limiting."
 ;;; Logging
 
 (defun org-capture-ai--log (format-string &rest args)
-  "Log message to *org-capture-ai-log* buffer if logging is enabled.
-FORMAT-STRING and ARGS are passed to `format'."
+  "Append a timestamped message to `*org-capture-ai-log*'.
+Does nothing when `org-capture-ai-enable-logging' is nil.
+FORMAT-STRING and ARGS are formatted with `format'."
   (when org-capture-ai-enable-logging
     (with-current-buffer (get-buffer-create "*org-capture-ai-log*")
       (goto-char (point-max))
@@ -225,8 +243,12 @@ FORMAT-STRING and ARGS are passed to `format'."
 ;;; Status Management
 
 (defun org-capture-ai--set-status (marker status &optional error-msg)
-  "Set STATUS at MARKER with optional ERROR-MSG.
-Auto-saves buffer on terminal states (completed, error, fetch-error)."
+  "Set the STATUS property of the entry at MARKER.
+Also updates the UPDATED_AT property with the current timestamp.
+When ERROR-MSG is non-nil, stores it in the ERROR property after
+sanitizing for single-line use.
+Saves the buffer automatically when STATUS is a terminal value:
+\"completed\", \"error\", or \"fetch-error\"."
   (org-capture-ai--log "Setting status to %s at marker %s" status marker)
   (save-excursion
     (org-with-point-at marker
@@ -242,17 +264,22 @@ Auto-saves buffer on terminal states (completed, error, fetch-error)."
 ;;; HTML Processing
 
 (defcustom org-capture-ai-fetch-method 'curl
-  "Method to use for fetching URLs.
-- 'url-retrieve: Use Emacs built-in (fast, no dependencies, limited compatibility)
-- 'curl: Use external curl command (better compatibility, requires curl installed)"
+  "Method used to fetch web page content.
+- `url-retrieve': Emacs built-in; no external dependencies, but limited
+  compatibility with sites that detect non-browser clients by means beyond
+  the User-Agent string (e.g., Substack serves a JavaScript-only shell).
+- `curl': External curl binary; sends more browser-like headers, follows
+  redirects, and enforces a 30-second timeout.  Requires curl on PATH."
   :type '(choice (const :tag "Emacs url-retrieve" url-retrieve)
                  (const :tag "External curl" curl))
   :group 'org-capture-ai)
 
 (defun org-capture-ai-fetch-url (url success-cb error-cb)
-  "Fetch URL asynchronously.
-Call SUCCESS-CALLBACK with HTML content on success.
-Call ERROR-CALLBACK with error info on failure."
+  "Fetch URL asynchronously using the method in `org-capture-ai-fetch-method'.
+Calls SUCCESS-CB with the fetched HTML string on success.
+Calls ERROR-CB with a descriptive error string on failure.
+Delegates to `org-capture-ai-fetch-url-curl' or
+`org-capture-ai-fetch-url-builtin' depending on configuration."
   (org-capture-ai--log "Fetching URL: %s (method: %s)" url org-capture-ai-fetch-method)
   (cond
    ((eq org-capture-ai-fetch-method 'curl)
@@ -261,8 +288,14 @@ Call ERROR-CALLBACK with error info on failure."
     (org-capture-ai-fetch-url-builtin url success-cb error-cb))))
 
 (defun org-capture-ai-fetch-url-curl (url success-cb error-cb)
-  "Fetch URL using external curl command.
-Uses make-process for stderr capture. Enforces 30-second timeout."
+  "Fetch URL asynchronously using the external curl command.
+Calls SUCCESS-CB with the HTML string on success.
+Calls ERROR-CB with a descriptive error string on failure.
+Uses `make-process' to capture stderr for diagnostic messages on failure.
+Passes \"-L\" to follow redirects and \"--max-time 30\" to enforce a
+30-second hard timeout.  Sends a browser-like User-Agent header to
+avoid content-negotiation issues with picky sites.
+Cleans up the temporary output file and stderr buffer in all code paths."
   (let* ((temp-file (make-temp-file "org-capture-ai-"))
          (err-buffer (generate-new-buffer " *org-capture-ai-curl-err*")))
     (make-process
@@ -305,7 +338,13 @@ Uses make-process for stderr capture. Enforces 30-second timeout."
                       (format "curl error: %s" err-msg)))))))))
 
 (defun org-capture-ai-fetch-url-builtin (url success-cb error-cb)
-  "Fetch URL using Emacs built-in url-retrieve."
+  "Fetch URL asynchronously using Emacs built-in `url-retrieve'.
+Calls SUCCESS-CB with the HTML string on success.
+Calls ERROR-CB with a descriptive error string on failure.
+Sends a browser-like User-Agent header.  Note that some sites detect
+non-browser clients through means beyond the User-Agent string and serve
+JavaScript-only shells instead of full HTML; use the `curl' fetch method
+for broader compatibility.  See `org-capture-ai-fetch-method'."
   ;; Set User-Agent to help get full HTML from some sites
   (let ((url-request-extra-headers
          '(("User-Agent" . "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"))))
@@ -345,15 +384,20 @@ Uses make-process for stderr capture. Enforces 30-second timeout."
 		  (list success-cb error-cb))))
 
 (defun org-capture-ai-parse-html (html-string)
-  "Parse HTML-STRING and return DOM tree."
+  "Parse HTML-STRING into a DOM tree using `libxml-parse-html-region'.
+Returns a DOM tree suitable for use with `dom-by-tag', `dom-attr', etc."
   (with-temp-buffer
     (insert html-string)
     (libxml-parse-html-region (point-min) (point-max))))
 
 (defun org-capture-ai--get-meta-tag (dom name)
-  "Get content attribute from meta tag with NAME in DOM.
-Checks both name= and property= attributes.
-Returns nil if content is empty or malformed."
+  "Return the content of the meta tag identified by NAME in DOM.
+Searches both name= and property= attributes, accommodating standard
+HTML meta tags and Open Graph / Dublin Core properties alike.
+Returns nil if no matching tag is found, if the content attribute is
+absent, if the value is shorter than 10 characters, or if the content
+contains Unicode replacement characters or mojibake patterns indicating
+encoding corruption."
   (when-let* ((meta-node
                (car (dom-search dom
                       (lambda (node)
@@ -372,7 +416,11 @@ Returns nil if content is empty or malformed."
       cleaned)))
 
 (defun org-capture-ai--extract-author (dom)
-  "Extract author/creator from DOM using multiple strategies."
+  "Return the author name from DOM, trying multiple strategies in order.
+Checks: Dublin Core DC.creator meta tag, HTML author meta tag, Open Graph
+article:author meta tag, JSON-LD schema.org author field (simple string
+values only), and HTML5 `<a rel=\"author\">' link text.
+Returns nil if no author information is found."
   (or
    ;; Dublin Core meta tag
    (org-capture-ai--get-meta-tag dom "DC.creator")
@@ -397,7 +445,11 @@ Returns nil if content is empty or malformed."
      (string-trim (dom-texts author-link)))))
 
 (defun org-capture-ai--extract-date (dom)
-  "Extract publication date from DOM."
+  "Return the publication date string from DOM.
+Checks, in order: Dublin Core DC.date meta tag, Open Graph
+article:published_time meta tag, generic date and pubdate meta tags,
+and the datetime attribute or text content of the first `<time>' element.
+Returns nil if no date information is found."
   (or
    ;; Dublin Core date
    (org-capture-ai--get-meta-tag dom "DC.date")
@@ -412,8 +464,13 @@ Returns nil if content is empty or malformed."
          (string-trim (dom-texts time-node))))))
 
 (defun org-capture-ai-extract-metadata (html url)
-  "Extract Dublin Core metadata from HTML string and URL.
-Returns a plist with Dublin Core elements."
+  "Extract Dublin Core metadata from HTML and URL.
+Returns a plist with keys: `:title', `:description', `:creator',
+`:publisher', `:date', `:type', `:language', `:rights', `:identifier',
+`:format', `:source', `:relation', `:coverage'.
+Values are sourced from Dublin Core meta tags where available, falling
+back to Open Graph tags, standard HTML meta tags, and page structure.
+`:identifier' is always set to URL.  `:format' is always \"text/html\"."
   (let* ((dom (org-capture-ai-parse-html html))
          (parsed-url (url-generic-parse-url url))
          (host (url-host parsed-url)))
@@ -449,7 +506,13 @@ Returns a plist with Dublin Core elements."
      :coverage (org-capture-ai--get-meta-tag dom "DC.coverage"))))
 
 (defun org-capture-ai-extract-readable-content (html)
-  "Extract main readable content from HTML, filtering noise."
+  "Extract the main readable text from HTML, stripping boilerplate.
+Removes script, style, nav, header, footer, and aside elements, then
+removes elements with ad-related or comment-section class names.
+Extracts text from the first `<article>', `<main>', or `<body>' element.
+Returns a whitespace-normalized plain-text string with characters outside
+the Unicode BMP removed for compatibility.  Returns an empty string if
+no usable content element is found."
   (let ((dom (org-capture-ai-parse-html html)))
 
     ;; Remove noise elements
@@ -529,10 +592,16 @@ without retrying. ATTEMPT tracks the current attempt number (internal, starts at
        (funcall callback nil (list :status (format "error: %s" err)))))))
 
 (defun org-capture-ai-llm-summarize (text callback &optional sentences)
-  "Summarize TEXT using LLM.
-Call CALLBACK with a plist containing :title and :summary.
-Optional SENTENCES overrides `org-capture-ai-summary-sentences'.
-Uses `org-capture-ai-summary-style' to determine format."
+  "Generate a title and summary for TEXT using the configured LLM.
+Calls CALLBACK with a plist of `:title' and `:summary' strings on
+success, or with nil on LLM failure.
+The prompt format is controlled by `org-capture-ai-summary-style':
+- `sentences': single paragraph; length set by `org-capture-ai-summary-sentences'
+  (or SENTENCES if provided).
+- `paragraphs': overview paragraph plus per-topic paragraphs; lengths
+  set by `org-capture-ai-summary-overview-sentences',
+  `org-capture-ai-summary-topic-max-sentences', and
+  `org-capture-ai-summary-topic-paragraphs'."
   (let* ((style org-capture-ai-summary-style)
          (prompt (if (eq style 'paragraphs)
                      ;; Multi-paragraph format
@@ -594,10 +663,14 @@ Do not include any other text or formatting."
           (funcall callback nil))))))
 
 (defun org-capture-ai-llm-extract-tags (text callback &optional max-tags)
-  "Extract tags from TEXT using LLM.
-Call CALLBACK with list of tag strings.
-Optional MAX-TAGS overrides `org-capture-ai-tag-count'.
-Uses curated faceted tags if `org-capture-ai-use-curated-tags' is t."
+  "Extract classification tags from TEXT using the configured LLM.
+Calls CALLBACK with a list of tag strings on success, or nil on failure.
+Tags use underscores for multi-word terms (e.g., \"machine_learning\").
+When `org-capture-ai-use-curated-tags' is non-nil, the LLM selects from
+the faceted lists `org-capture-ai-tags-type', `org-capture-ai-tags-status',
+`org-capture-ai-tags-quality', and `org-capture-ai-tags-domain'.
+When nil, the LLM generates free-form tags; MAX-TAGS (or
+`org-capture-ai-tag-count') limits the number requested."
   (let* ((use-curated org-capture-ai-use-curated-tags)
          (prompt (if use-curated
                      ;; Curated faceted tags prompt
@@ -643,7 +716,16 @@ No explanation, no extra formatting."
   "List of markers currently being processed to prevent duplicates.")
 
 (defun org-capture-ai--process-entry ()
-  "Process the last captured URL entry with AI."
+  "Hook function installed on `org-capture-after-finalize-hook'.
+When a URL capture completes without abort, schedules async processing
+of the captured entry.  Locates the entry via the bookmark
+`org-capture-last-stored'.
+Processing is skipped when: the entry has no URL property, the capture
+was aborted (`org-note-abort' is non-nil), STATUS is not \"processing\",
+or the entry is already tracked in `org-capture-ai--processing-markers'.
+When `org-capture-ai-process-on-capture' is non-nil, schedules
+`org-capture-ai--async-process' immediately; otherwise schedules
+`org-capture-ai--mark-queued' for later batch processing."
   (org-capture-ai--log "=== HOOK FIRED === abort=%s" org-note-abort)
 
   ;; Check if this was a URL capture by checking the stored entry
@@ -675,7 +757,9 @@ No explanation, no extra formatting."
      (org-capture-ai--log "Error in process-entry: %s" err))))
 
 (defun org-capture-ai--mark-queued (marker)
-  "Mark the entry at MARKER as queued."
+  "Set the STATUS property of the entry at MARKER to \"queued\".
+Queued entries are processed later by `org-capture-ai-process-queued',
+either invoked manually or automatically via the idle timer."
   (save-excursion
     (org-with-point-at marker
       (org-back-to-heading t)
@@ -683,7 +767,12 @@ No explanation, no extra formatting."
       (org-capture-ai--log "Entry marked as queued"))))
 
 (defun org-capture-ai--async-process (marker)
-  "Fetch URL and process with LLM asynchronously using MARKER."
+  "Begin async fetch-and-analyze processing for the entry at MARKER.
+Reads the URL property from the entry, sets STATUS to \"fetching\", and
+initiates an async fetch via `org-capture-ai-fetch-url'.
+On fetch success, continues with `org-capture-ai--process-html'.
+On fetch failure, sets STATUS to \"fetch-error\" and cleans up MARKER.
+Returns early with a log message if the entry has no URL property."
   (save-excursion
     (org-with-point-at marker
       (org-back-to-heading t)
@@ -710,12 +799,13 @@ No explanation, no extra formatting."
             (set-marker marker nil)))))))
 
 (defun org-capture-ai--sanitize-property-value (value)
-  "Sanitize VALUE for use in org-mode properties drawer.
-Properties must be single-line. This function:
-- Replaces newlines with spaces
-- Collapses multiple spaces into single space
-- Trims leading/trailing whitespace
-- Truncates to reasonable length (500 chars)"
+  "Sanitize VALUE for storage as an org-mode property.
+Org properties must fit on a single line.  This function:
+- Trims leading and trailing whitespace
+- Replaces newline and carriage-return sequences with a single space
+- Collapses runs of whitespace to a single space
+- Truncates the result to 500 characters, appending \"...\" if truncated
+Returns nil when VALUE is nil."
   (when value
     (let ((sanitized (string-trim value)))
       ;; Replace newlines and collapse whitespace
@@ -727,8 +817,12 @@ Properties must be single-line. This function:
       sanitized)))
 
 (defun org-capture-ai--process-html (html-content url marker)
-  "Extract content from HTML-CONTENT and send to LLM.
-URL is the source URL. Update entry at MARKER with results."
+  "Process HTML-CONTENT fetched from URL and drive LLM analysis.
+Extracts Dublin Core metadata and readable body text from HTML-CONTENT,
+writes the metadata to the properties drawer at MARKER, then passes the
+body text to `org-capture-ai--llm-analyze' for title, summary, and tag
+generation.  Body text is truncated to `org-capture-ai-max-content-length'
+characters before being sent to the LLM."
   (let* ((metadata (org-capture-ai-extract-metadata html-content url))
          (clean-text (org-capture-ai-extract-readable-content html-content))
          (title (plist-get metadata :title)))
@@ -778,7 +872,19 @@ URL is the source URL. Update entry at MARKER with results."
     (org-capture-ai--llm-analyze clean-text marker)))
 
 (defun org-capture-ai--llm-analyze (text marker)
-  "Analyze TEXT with LLM and update entry at MARKER."
+  "Analyze TEXT with the LLM and update the entry at MARKER.
+Fails immediately with STATUS \"error\" if TEXT is empty or shorter than
+50 characters, indicating that content extraction found nothing usable.
+Otherwise runs two sequential LLM calls:
+1. `org-capture-ai-llm-summarize': generates a title and summary.
+   Updates the heading text, TITLE property, entry body, DESCRIPTION
+   property (first sentence of summary), and AI_MODEL property.
+2. `org-capture-ai-llm-extract-tags': extracts classification tags.
+   Stores them in the SUBJECT property (comma-separated) and as org
+   headline tags.
+On completion, sets STATUS to \"completed\" and records PROCESSED_AT,
+then removes MARKER from `org-capture-ai--processing-markers' and
+invalidates it."
   (org-capture-ai--log "llm-analyze called with marker: %s" marker)
 
   ;; Validate that we have content to analyze
@@ -930,8 +1036,11 @@ Called both to seed the initial batch and from fetch callbacks to refill."
           (org-capture-ai--batch-dispatch-next))))))
 
 (defun org-capture-ai-reprocess-entry ()
-  "Manually reprocess the org entry at point.
-This adds new AI analysis to existing content without removing it."
+  "Re-fetch and re-analyze the URL in the org entry at point.
+Sets STATUS to \"reprocessing\" and runs the full fetch-and-LLM pipeline.
+New AI-generated content (title, summary, tags, metadata) overwrites the
+previous values; the body text is replaced with the new summary.
+Signals a user error if the entry at point has no URL property."
   (interactive)
   (let ((url (org-entry-get nil "URL"))
         (marker (point-marker)))
@@ -998,8 +1107,17 @@ The heading title will be replaced with the new AI-generated title."
 ;;; Setup
 
 (defun org-capture-ai-setup ()
-  "Set up org-capture-ai with default configuration.
-Adds capture template and hooks."
+  "Install the org-capture-ai URL capture template and process hooks.
+Registers a capture template under `org-capture-ai-template-key' that
+prompts for a URL, creates an entry in `org-capture-ai-default-file'
+under a \"Bookmarks\" heading, and immediately finalizes so async
+processing can begin.
+Installs `org-capture-ai--process-entry' on
+`org-capture-after-finalize-hook' idempotently — safe to call multiple
+times without duplicating the hook.
+If `org-capture-ai-batch-idle-time' is non-nil and no idle timer is
+already running, starts a repeating idle timer to invoke
+`org-capture-ai-process-queued' after the configured idle period."
   (interactive)
 
   ;; Add capture template
@@ -1027,7 +1145,10 @@ Adds capture template and hooks."
            org-capture-ai-template-key))
 
 (defun org-capture-ai-teardown ()
-  "Remove org-capture-ai hooks and timers."
+  "Remove org-capture-ai hooks and cancel the batch processing timer.
+Removes `org-capture-ai--process-entry' from
+`org-capture-after-finalize-hook' and cancels the idle timer started by
+`org-capture-ai-setup', if any.  Safe to call when not set up."
   (interactive)
   (remove-hook 'org-capture-after-finalize-hook #'org-capture-ai--process-entry)
 
