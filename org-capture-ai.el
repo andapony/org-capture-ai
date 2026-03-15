@@ -30,6 +30,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'org)
 (require 'org-capture)
 (require 'gptel)
@@ -185,10 +186,29 @@ most LLM context limits while covering the vast majority of articles."
   :type 'integer
   :group 'org-capture-ai)
 
+(defcustom org-capture-ai-files nil
+  "List of org files to search for queued entries during batch processing.
+If nil, defaults to a list containing `org-capture-ai-default-file'.
+Set this if you capture URLs to multiple org files."
+  :type '(repeat file)
+  :group 'org-capture-ai)
+
+(defcustom org-capture-ai-batch-concurrency 3
+  "Maximum number of simultaneous URL fetches during batch processing.
+Higher values process the queue faster but may trigger rate limiting."
+  :type 'integer
+  :group 'org-capture-ai)
+
 ;;; Internal Variables
 
 (defvar org-capture-ai--batch-timer nil
   "Timer for batch processing queued entries.")
+
+(defvar org-capture-ai--active-fetch-count 0
+  "Number of URL fetches currently in progress during batch processing.")
+
+(defvar org-capture-ai--pending-batch nil
+  "Queue of (url . marker) pairs waiting to be dispatched in batch processing.")
 
 ;;; Logging
 
@@ -853,28 +873,56 @@ URL is the source URL. Update entry at MARKER with results."
 ;;; Batch Processing
 
 (defun org-capture-ai-process-queued ()
-  "Process all entries with STATUS=queued."
+  "Process all entries with STATUS=queued across all configured files.
+Respects `org-capture-ai-batch-concurrency' to avoid overwhelming the LLM API.
+Files searched are `org-capture-ai-files', defaulting to `org-capture-ai-default-file'."
   (interactive)
-  (let ((processed 0))
-    (org-map-entries
-     (lambda ()
-       (let ((url (org-entry-get nil "URL"))
-             (marker (point-marker)))
-         (when url
-           (setq processed (1+ processed))
-           (org-capture-ai--log "Processing queued entry: %s" url)
-           (org-capture-ai--set-status marker "fetching")
+  (let ((files (or org-capture-ai-files (list org-capture-ai-default-file)))
+        (entries nil))
+    ;; Collect all queued entries across all configured files
+    (dolist (file files)
+      (when (file-exists-p file)
+        (org-map-entries
+         (lambda ()
+           (let ((url (org-entry-get nil "URL")))
+             (when url
+               (push (cons url (point-marker)) entries))))
+         "STATUS=\"queued\""
+         (list file))))
+    (setq entries (nreverse entries))
+    (if (null entries)
+        (message "org-capture-ai: No queued entries found")
+      (message "org-capture-ai: Starting batch processing of %d entries" (length entries))
+      (setq org-capture-ai--pending-batch entries)
+      (setq org-capture-ai--active-fetch-count 0)
+      ;; Seed up to concurrency limit
+      (let ((initial (min org-capture-ai-batch-concurrency (length entries))))
+        (dotimes (_ initial)
+          (org-capture-ai--batch-dispatch-next))))))
 
-           ;; Fetch and process
-           (org-capture-ai-fetch-url url
-             (lambda (html-content)
-               (org-capture-ai--process-html html-content url marker))
-             (lambda (error)
-               (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
-               (set-marker marker nil))))))
-     "STATUS=\"queued\""
-     (list org-capture-ai-default-file))
-    (message "org-capture-ai: Started processing %d queued entries" processed)))
+(defun org-capture-ai--batch-dispatch-next ()
+  "Start processing the next pending batch entry if below concurrency limit.
+Called both to seed the initial batch and from fetch callbacks to refill."
+  (when (and org-capture-ai--pending-batch
+             (< org-capture-ai--active-fetch-count org-capture-ai-batch-concurrency))
+    (let* ((entry (pop org-capture-ai--pending-batch))
+           (url (car entry))
+           (marker (cdr entry)))
+      (cl-incf org-capture-ai--active-fetch-count)
+      (org-capture-ai--log "Batch dispatch: %s (active: %d, pending: %d)"
+                           url org-capture-ai--active-fetch-count
+                           (length org-capture-ai--pending-batch))
+      (org-capture-ai--set-status marker "fetching")
+      (org-capture-ai-fetch-url url
+        (lambda (html-content)
+          (cl-decf org-capture-ai--active-fetch-count)
+          (org-capture-ai--process-html html-content url marker)
+          (org-capture-ai--batch-dispatch-next))
+        (lambda (error)
+          (cl-decf org-capture-ai--active-fetch-count)
+          (org-capture-ai--set-status marker "fetch-error" (format "%s" error))
+          (set-marker marker nil)
+          (org-capture-ai--batch-dispatch-next))))))
 
 (defun org-capture-ai-reprocess-entry ()
   "Manually reprocess the org entry at point.
