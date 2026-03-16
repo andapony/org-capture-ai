@@ -1044,23 +1044,8 @@ invalidates it."
                 ;; Update TITLE property with AI-generated title (sanitized)
                 (org-entry-put nil "TITLE" (org-capture-ai--sanitize-property-value title)))
 
-              ;; Add summary to body
+              ;; Set DESCRIPTION from first sentence of AI summary
               (when summary
-                ;; Move past properties but NOT past blank lines
-                (org-end-of-meta-data)
-                ;; Delete any existing blank lines
-                (while (and (looking-at "^[ \t]*$") (not (eobp)))
-                  (delete-region (point) (progn (forward-line 1) (point))))
-                ;; Insert exactly one blank line, then the summary
-                (insert "\n")
-                ;; Insert summary and fill long lines
-                (let ((start-pos (point)))
-                  (insert summary "\n\n")
-                  ;; Fill the inserted text to wrap long lines
-                  (fill-region start-pos (- (point) 2) nil t))
-
-                ;; Always set DESCRIPTION from AI summary (overwrites potentially corrupted HTML meta)
-                ;; Use first sentence of summary for clean, complete description
                 (let ((first-sentence (if (string-match "^\\([^.!?]+[.!?]\\)" summary)
                                           (match-string 1 summary)
                                         summary)))

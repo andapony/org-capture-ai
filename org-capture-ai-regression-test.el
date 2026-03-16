@@ -457,5 +457,40 @@ File: org-capture-ai.el"
   (should (string= "1 min"
                    (org-capture-ai--estimate-reading-time "Short article."))))
 
+(ert-deftest org-capture-ai-regression-20260315-no-summary-paragraph-in-body ()
+  "Regression: Entry body contains only takeaway bullets, not a summary paragraph.
+
+Bug: Summary paragraph was inserted into the entry body, but for quick-triage
+use the takeaways bullets already answer 'is this worth reading?', making the
+prose summary redundant.
+
+Fix: Remove summary body insertion from org-capture-ai--llm-analyze.
+DESCRIPTION property (first sentence) is still set for search/agenda use.
+
+Date: 2026-03-15
+File: org-capture-ai.el"
+  (org-capture-ai-test--with-mocked-env
+   (let ((org-capture-ai-extract-takeaways t))
+     (with-current-buffer (find-file-noselect org-capture-ai-test--temp-file)
+       (let* ((marker (org-capture-ai-test--create-processing-entry
+                       "https://example.com/article"))
+              (entry-pos (marker-position marker)))
+
+         (org-capture-ai--async-process marker)
+         (org-capture-ai-test--wait-for-processing marker)
+
+         (goto-char entry-pos)
+         (org-back-to-heading t)
+
+         (should (equal "completed" (org-entry-get nil "STATUS")))
+         ;; DESCRIPTION property should still be set
+         (should (org-entry-get nil "DESCRIPTION"))
+         ;; Body should NOT contain the summary prose
+         (let ((body (buffer-substring-no-properties
+                      (progn (org-end-of-meta-data) (point))
+                      (org-entry-end-position))))
+           ;; Summary mock is "This is a test summary. It has multiple sentences."
+           (should-not (string-match-p "This is a test summary" body))))))))
+
 (provide 'org-capture-ai-regression-test)
 ;;; org-capture-ai-regression-test.el ends here
