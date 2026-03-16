@@ -238,7 +238,7 @@ risk of hitting API rate limits."
 
 (defcustom org-capture-ai-extract-takeaways t
   "When non-nil, extract 3-5 key takeaways in addition to summary and tags.
-Takeaways are inserted as a bullet list immediately before the summary paragraph.
+Takeaways are inserted as a bullet list at the top of the entry body.
 Each takeaway is a single sentence distilling one important insight.
 Set to nil to disable this step and reduce LLM API call count by one."
   :type 'boolean

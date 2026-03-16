@@ -257,7 +257,7 @@ Bug: Without takeaways feature, there is no way to get a quick overview
 of an article's key insights without reading the full summary.
 
 Fix: org-capture-ai-llm-extract-takeaways runs as a third LLM step after
-tags, inserting a bullet list immediately before the summary paragraph.
+tags, inserting a bullet list at the top of the entry body.
 
 Date: 2026-03-15
 File: org-capture-ai.el"
