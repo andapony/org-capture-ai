@@ -150,19 +150,24 @@ Only used when `org-capture-ai-use-curated-tags' is nil."
     "tutorial" "reference" "news" "entertainment")
   "Comprehensive curated tag set for domain/subject facet.
 
-This 42-tag flat domain system provides complete coverage across eight major domains:
-- Technology (8): programming, web dev, AI, data science, devops, security, design, tools
+This 42-tag flat domain system provides complete coverage across eight domains:
+- Technology (8): programming, web dev, AI, data science, devops, security,
+  design, tools
 - Creative (5): visual arts, writing, video, music, creative inspiration
-- Professional/Business (7): business, marketing, career, management, productivity, finance, education
-- Science & Medicine (5): health/medicine, biology, physics/chemistry, environment, space
+- Professional/Business (7): business, marketing, career, management,
+  productivity, finance, education
+- Science & Medicine (5): health/medicine, biology, physics/chemistry,
+  environment, space
 - Social Sciences (4): psychology, politics, sociology, economics
 - Humanities (3): history, philosophy, literature
-- Personal/Lifestyle (6): self-improvement, fitness, food/cooking, travel, home/DIY, relationships
+- Personal/Lifestyle (6): self-improvement, fitness, food/cooking, travel,
+  home/DIY, relationships
 - Functional/Meta (4): tutorial, reference, news, entertainment
 
-Based on research showing optimal bookmark tag systems use 35-50 tags for generalist
-collections. This seed set balances comprehensive coverage with practical usability.
-Customize by adding/removing tags based on your collection focus and usage patterns."
+Based on research showing optimal bookmark tag systems use 35-50 tags for
+generalist collections. This seed set balances comprehensive coverage with
+practical usability. Customize by adding/removing tags based on your
+collection focus and usage patterns."
   :type '(repeat string)
   :group 'org-capture-ai)
 
@@ -583,7 +588,7 @@ no usable content element is found."
 Call CALLBACK with (response info) on completion.
 Response is nil on error after all retries exhausted.
 Synchronous errors (e.g. gptel not configured) are passed through immediately
-without retrying. ATTEMPT tracks the current attempt number (internal, starts at 1)."
+without retrying. ATTEMPT is the current attempt number (internal; starts at 1)."
   (let ((attempt (or attempt 1)))
     (org-capture-ai--log "LLM request attempt %d/%d: %s (prompt length: %d chars)"
                          attempt org-capture-ai-max-retries
@@ -626,10 +631,10 @@ without retrying. ATTEMPT tracks the current attempt number (internal, starts at
 Calls CALLBACK with a plist of `:title' and `:summary' strings on
 success, or with nil on LLM failure.
 The prompt format is controlled by `org-capture-ai-summary-style':
-- `sentences': single paragraph; length set by `org-capture-ai-summary-sentences'
-  (or SENTENCES if provided).
-- `paragraphs': overview paragraph plus per-topic paragraphs; lengths
-  set by `org-capture-ai-summary-overview-sentences',
+- `sentences': single paragraph; length set by
+  `org-capture-ai-summary-sentences' (or SENTENCES if provided).
+- `paragraphs': overview plus per-topic paragraphs; lengths set by
+  `org-capture-ai-summary-overview-sentences',
   `org-capture-ai-summary-topic-max-sentences', and
   `org-capture-ai-summary-topic-paragraphs'."
   (let* ((style org-capture-ai-summary-style)
@@ -1036,10 +1041,11 @@ Stores tags in the SUBJECT property (comma-separated) and as org headline tags."
   "Analyze TEXT with the LLM and update the entry at MARKER.
 Fails immediately with STATUS \"error\" if TEXT is empty or shorter than
 50 characters.  Otherwise runs up to three sequential LLM calls:
-1. `org-capture-ai-llm-summarize' — updates heading, TITLE, DESCRIPTION, AI_MODEL.
-2. `org-capture-ai-llm-extract-tags' — updates SUBJECT and org headline tags.
-3. `org-capture-ai-llm-extract-takeaways' (when `org-capture-ai-extract-takeaways'
-   is non-nil) — inserts bullet list at top of entry body.
+1. `org-capture-ai-llm-summarize' — updates heading, TITLE, DESCRIPTION,
+   AI_MODEL.
+2. `org-capture-ai-llm-extract-tags' — updates SUBJECT and org tags.
+3. `org-capture-ai-llm-extract-takeaways' (when
+   `org-capture-ai-extract-takeaways' is non-nil) — inserts bullet list.
 On completion calls `org-capture-ai--finalize-entry'."
   (org-capture-ai--log "llm-analyze called with marker: %s" marker)
   (if (or (not text) (string-empty-p text) (< (length text) 50))
@@ -1077,8 +1083,9 @@ On completion calls `org-capture-ai--finalize-entry'."
 
 (defun org-capture-ai-process-queued ()
   "Process all entries with STATUS=queued across all configured files.
-Respects `org-capture-ai-batch-concurrency' to avoid overwhelming the LLM API.
-Files searched are `org-capture-ai-files', defaulting to `org-capture-ai-default-file'."
+Respects `org-capture-ai-batch-concurrency' to limit parallel fetches.
+Files searched are `org-capture-ai-files', defaulting to
+`org-capture-ai-default-file'."
   (interactive)
   (cl-block org-capture-ai-process-queued
   ;; Guard against concurrent invocations (e.g. idle timer firing during a running batch)
