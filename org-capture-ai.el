@@ -33,6 +33,7 @@
 (require 'cl-lib)
 (require 'org)
 (require 'org-capture)
+(require 'bookmark)
 (require 'gptel)
 (require 'url)
 (require 'dom)
@@ -676,7 +677,7 @@ IMPORTANT: The first sentence of the SUMMARY must be a complete, grammatically c
 Do not include any other text or formatting."
                              sentence-count)))))
     (org-capture-ai-llm-request text prompt
-      (lambda (response info)
+      (lambda (response _info)
         (if response
             (let ((title nil)
                   (summary nil))
@@ -730,7 +731,7 @@ Use underscores instead of hyphens for multi-word tags.
 No explanation, no extra formatting."
                              tag-count)))))
     (org-capture-ai-llm-request text prompt
-      (lambda (response info)
+      (lambda (response _info)
         (if response
             (let ((tags (split-string (string-trim response) "," t)))
               ;; Clean tags: trim whitespace and replace hyphens with underscores
