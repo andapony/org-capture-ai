@@ -1134,8 +1134,8 @@ Called both to seed the initial batch and from fetch callbacks to refill."
 (defun org-capture-ai-reprocess-entry ()
   "Re-fetch and re-analyze the URL in the org entry at point.
 Sets STATUS to \"reprocessing\" and runs the full fetch-and-LLM pipeline.
-New AI-generated content (title, summary, tags, metadata) overwrites the
-previous values; the body text is replaced with the new summary.
+New AI-generated content (title, tags, takeaways, metadata) overwrites the
+previous values; the body is replaced with fresh takeaway bullets.
 Signals a user error if the entry at point has no URL property."
   (interactive)
   (let ((url (org-entry-get nil "URL"))

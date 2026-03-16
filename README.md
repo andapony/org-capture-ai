@@ -285,11 +285,10 @@ To completely refresh an entry with updated content from the URL:
 3. Confirm the refresh when prompted
 
 This will:
-- Clear the existing summary and body content
-- Clear all metadata properties and tags
+- Clear the existing body content and metadata properties
 - Re-fetch the URL
 - Extract fresh metadata
-- Generate a new AI summary and tags
+- Generate a new AI title, tags, and takeaways
 - Replace the heading title
 
 Use this when:
