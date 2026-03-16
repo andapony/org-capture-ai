@@ -989,28 +989,59 @@ and invalidates it."
   (org-capture-ai--log "Removed marker %d from processing list" (marker-position marker))
   (set-marker marker nil))
 
+(defun org-capture-ai--apply-summary (result marker)
+  "Write summary RESULT to the entry at MARKER.
+Updates the heading title, TITLE property, DESCRIPTION property, and
+AI_MODEL property.  RESULT is a plist with :title and :summary keys."
+  (let ((title (plist-get result :title))
+        (summary (plist-get result :summary)))
+    (save-excursion
+      (org-with-point-at marker
+        (org-back-to-heading t)
+        (when title
+          (org-edit-headline title)
+          (org-entry-put nil "TITLE" (org-capture-ai--sanitize-property-value title)))
+        (when summary
+          (let ((first-sentence (if (string-match "^\\([^.!?]+[.!?]\\)" summary)
+                                    (match-string 1 summary)
+                                  summary)))
+            (org-entry-put nil "DESCRIPTION"
+                           (org-capture-ai--sanitize-property-value first-sentence))))
+        (org-entry-put nil "AI_MODEL"
+                       (org-capture-ai--sanitize-property-value (symbol-name gptel-model)))))))
+
+(defun org-capture-ai--apply-tags (tags marker)
+  "Write TAGS to the entry at MARKER.
+Stores tags in the SUBJECT property (comma-separated) and as org headline tags."
+  (save-excursion
+    (org-with-point-at marker
+      (org-back-to-heading t)
+      (org-entry-put nil "SUBJECT"
+                     (org-capture-ai--sanitize-property-value
+                      (mapconcat #'identity tags ", ")))
+      (org-set-tags (delete-dups (append (org-get-tags) tags))))))
+
+(defun org-capture-ai--apply-takeaways (takeaways marker)
+  "Insert TAKEAWAYS as a bullet list at the top of the entry body at MARKER."
+  (save-excursion
+    (org-with-point-at marker
+      (org-back-to-heading t)
+      (org-end-of-meta-data)
+      (forward-line 1) ; skip blank line after :END:
+      (insert (mapconcat (lambda (s) (format "- %s" s)) takeaways "\n")
+              "\n\n"))))
+
 (defun org-capture-ai--llm-analyze (text marker)
   "Analyze TEXT with the LLM and update the entry at MARKER.
 Fails immediately with STATUS \"error\" if TEXT is empty or shorter than
-50 characters, indicating that content extraction found nothing usable.
-Otherwise runs up to three sequential LLM calls:
-1. `org-capture-ai-llm-summarize': generates a title and summary.
-   Updates the heading text, TITLE property, entry body, DESCRIPTION
-   property (first sentence of summary), and AI_MODEL property.
-2. `org-capture-ai-llm-extract-tags': extracts classification tags.
-   Stores them in the SUBJECT property (comma-separated) and as org
-   headline tags.
+50 characters.  Otherwise runs up to three sequential LLM calls:
+1. `org-capture-ai-llm-summarize' — updates heading, TITLE, DESCRIPTION, AI_MODEL.
+2. `org-capture-ai-llm-extract-tags' — updates SUBJECT and org headline tags.
 3. `org-capture-ai-llm-extract-takeaways' (when `org-capture-ai-extract-takeaways'
-   is non-nil): extracts 3-5 key insights, inserted as a bullet list
-   immediately before the summary paragraph in the entry body.
-On completion, sets STATUS to \"completed\" and records PROCESSED_AT,
-then removes MARKER from `org-capture-ai--processing-markers' and
-invalidates it."
+   is non-nil) — inserts bullet list at top of entry body.
+On completion calls `org-capture-ai--finalize-entry'."
   (org-capture-ai--log "llm-analyze called with marker: %s" marker)
-
-  ;; Validate that we have content to analyze
   (if (or (not text) (string-empty-p text) (< (length text) 50))
-      ;; Content too short or empty - fail gracefully
       (progn
         (org-capture-ai--log "Content too short or empty (%d chars), cannot analyze"
                              (if text (length text) 0))
@@ -1024,66 +1055,22 @@ invalidates it."
         (org-capture-ai--set-status marker "error")
         (message "org-capture-ai: No readable content found - check *org-capture-ai-log* for details")
         (set-marker marker nil))
-
-    ;; Content is valid - proceed with LLM analysis
-    ;; First: Generate title and summary
     (org-capture-ai--log "Calling llm-summarize...")
     (org-capture-ai-llm-summarize text
-    (lambda (result)
-      (when result
-        (let ((title (plist-get result :title))
-              (summary (plist-get result :summary)))
-          (save-excursion
-            (org-with-point-at marker
-              (org-back-to-heading t)
-
-              ;; Update heading title and TITLE property
-              (when title
-                ;; Use org-edit-headline to properly update title while preserving tags
-                (org-edit-headline title)
-                ;; Update TITLE property with AI-generated title (sanitized)
-                (org-entry-put nil "TITLE" (org-capture-ai--sanitize-property-value title)))
-
-              ;; Set DESCRIPTION from first sentence of AI summary
-              (when summary
-                (let ((first-sentence (if (string-match "^\\([^.!?]+[.!?]\\)" summary)
-                                          (match-string 1 summary)
-                                        summary)))
-                  (org-entry-put nil "DESCRIPTION" (org-capture-ai--sanitize-property-value first-sentence))))
-
-              (org-entry-put nil "AI_MODEL" (org-capture-ai--sanitize-property-value (symbol-name gptel-model)))))
-
-          ;; Second: Extract tags
-          (org-capture-ai-llm-extract-tags text
-            (lambda (tags)
-              (when tags
-                (save-excursion
-                  (org-with-point-at marker
-                    (org-back-to-heading t)
-                    ;; Save as SUBJECT (Dublin Core) - sanitized
-                    (org-entry-put nil "SUBJECT"
-                                   (org-capture-ai--sanitize-property-value
-                                    (mapconcat #'identity tags ", ")))
-                    ;; Also add as org tags (removing duplicates)
-                    (org-set-tags (delete-dups (append (org-get-tags) tags))))))
-
-              ;; Third: Extract takeaways (if enabled and tags succeeded)
-              (if (and tags org-capture-ai-extract-takeaways)
-                  (org-capture-ai-llm-extract-takeaways text
-                    (lambda (takeaways)
-                      (when takeaways
-                        (save-excursion
-                          (org-with-point-at marker
-                            (org-back-to-heading t)
-                            ;; Insert bullet list before the summary paragraph
-                            (org-end-of-meta-data)
-                            (forward-line 1) ; skip the blank line after :END:
-                            (let ((bullet-text
-                                   (mapconcat (lambda (s) (format "- %s" s))
-                                              takeaways "\n")))
-                              (insert bullet-text "\n\n")))))
-                      (org-capture-ai--finalize-entry marker tags)))
-                (org-capture-ai--finalize-entry marker tags))))))))))
+      (lambda (result)
+        (when result
+          (org-capture-ai--apply-summary result marker))
+        (org-capture-ai-llm-extract-tags text
+          (lambda (tags)
+            (when tags
+              (org-capture-ai--apply-tags tags marker))
+            (if (and tags org-capture-ai-extract-takeaways)
+                (org-capture-ai-llm-extract-takeaways text
+                  (lambda (takeaways)
+                    (when takeaways
+                      (org-capture-ai--apply-takeaways takeaways marker))
+                    (org-capture-ai--finalize-entry marker tags)))
+              (org-capture-ai--finalize-entry marker tags))))))))
 
 ;;; Batch Processing
 
